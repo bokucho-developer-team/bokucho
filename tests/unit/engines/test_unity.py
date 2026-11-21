@@ -76,6 +76,24 @@ def test_user_strings_refuses_a_file_that_is_not_an_assembly():
         user_strings(b"MZ" + b"\0" * 100)
 
 
+def test_an_assembly_without_string_literals_has_none_to_read():
+    # A library with no literal has no #US heap; extraction warned it was unreadable.
+    image = bytearray(assembly(["x"]))
+    marker = bytes(image).index(b"#US\0")
+    image[marker : marker + 4] = b"#XX\0"
+    assert user_strings(bytes(image)) == []
+
+
+def test_layout_leaves_out_the_libraries_a_game_ships(tmp_path):
+    # Their literals are log and error text: thousands of lines in an English game.
+    names = ["Assembly-CSharp.dll", "Newtonsoft.Json.dll", "Sentry.Unity.dll", "Pug.Other.dll",
+             "com.unity.multiplayer-hlapi.Runtime.dll", "Rewired_Core.dll", "DOTween.dll"]
+    game = unity_game(tmp_path, dlls={name: [] for name in names})
+    assert [path.name for path in UnityLayout(game).assemblies()] == [
+        "Assembly-CSharp.dll", "Pug.Other.dll"
+    ]
+
+
 @pytest.mark.parametrize(
     ("text", "source", "kept"),
     [

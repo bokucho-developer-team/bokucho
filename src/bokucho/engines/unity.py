@@ -53,6 +53,14 @@ _SKIPPED_ASSETS = frozenset(
 #: Framework assemblies: their literals are not the game's.
 _FRAMEWORK_PREFIXES = ("System", "Mono.", "mscorlib", "netstandard", "Unity.", "UnityEngine",
                        "Microsoft.")
+#: Libraries games ship beside their own code: their literals are log and error text a
+#: player never reads, which an English game would otherwise send to translation.
+_LIBRARY_PREFIXES = (
+    "com.unity.", "com.rlabrecque.", "Newtonsoft.", "Sentry", "Google.", "Rewired",
+    "DOTween", "DG.Tweening", "spine-", "Spine.", "Facepunch.", "Steamworks", "mcs.",
+    "modio", "Dissonance", "Photon", "Mirror", "FMOD", "Coffee.", "Zenject", "UniRx",
+    "UniTask", "MessagePack", "Sirenix.", "Cinemachine", "protobuf", "Mono.Cecil",
+)
 _SCRIPTS = {
     "ja": re.compile(r"[぀-ヿ㐀-鿿]"),
     "zh": re.compile(r"[㐀-鿿]"),
@@ -135,7 +143,7 @@ class UnityLayout:
         managed = self.data / "Managed"
         return sorted(
             path for path in managed.glob("*.dll")
-            if not path.name.startswith(_FRAMEWORK_PREFIXES)
+            if not path.name.startswith(_FRAMEWORK_PREFIXES + _LIBRARY_PREFIXES)
         ) if managed.is_dir() else []
 
 
@@ -197,7 +205,7 @@ def _user_string_heap(image: bytes) -> bytes:
         cursor = (end + 4) & ~3
         if name == b"#US":
             return image[metadata + start : metadata + start + size]
-    raise ValueError("no #US heap")
+    return b""  # an assembly with no string literal has no #US heap at all
 
 
 def wanted(text: str, source_lang: str) -> bool:
