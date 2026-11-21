@@ -181,6 +181,10 @@ def write_cs2_mount(project: Project, destination: Path) -> None:
     (destination / "mount.json").write_text(json.dumps({"kind": "cs2"}), encoding="utf-8")
 
 
+#: The license of the face the Unity fallback fonts are drawn from (tools/build_unity_fonts.py).
+FONT_LICENSE = "GenYo-GenWan-OFL.txt"
+
+
 def write_unity_mount(project: Project, destination: Path, fonts: Path) -> None:
     """The translation XUnity.AutoTranslator reads, with a fallback font from ``fonts``.
 
@@ -224,6 +228,10 @@ def write_unity_mount(project: Project, destination: Path, fonts: Path) -> None:
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(font, target)
         fallback = f"{FONT_DIR}/{font.name}"
+        # The atlas is drawn from GenYoGothic2 TW, whose OFL travels with it.
+        terms = fonts.parent / "licenses" / FONT_LICENSE
+        if terms.is_file():
+            shutil.copyfile(terms, target.with_name(FONT_LICENSE))
     # XUnity's TextureDirectory, Translation\{Lang}\Texture under BepInEx.
     language = xunity_language(project.config.target_lang)
     textures = _copy_textures(

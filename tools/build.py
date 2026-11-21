@@ -35,9 +35,9 @@ UIF_PATCH = ROOT / "tools" / "uif-font-path.patch"
 UIF_DIST = ROOT / "build" / "uif"
 UIF_DLL = UIF_DIST / "winmm.dll"
 UIF_TOOLSET = "v143"
-#: Written by tools/build_unity_fonts.py, which needs a Unity editor; a build without them
-#: makes Unity patches with no TextMesh Pro fallback font.
-UNITY_FONTS_DIR = ROOT / "build" / "unity-fonts"
+#: Built by tools/build_unity_fonts.py, which needs a Unity editor, and kept in the
+#: repository so every build has them; they ship beside the executable, not inside it.
+UNITY_FONTS_DIR = ROOT / "unity-fonts"
 
 HIDDEN_IMPORTS = (
     "bokucho.engines.livemaker",
@@ -74,7 +74,7 @@ PORTABLE_DOCUMENTS = (
     "PORTABLE_README.md",
     "THIRD_PARTY_NOTICES.md",
 )
-PORTABLE_DIRECTORIES = ("licenses",)
+PORTABLE_DIRECTORIES = ("licenses", UNITY_FONTS_DIR.name)
 
 
 def _remove_path(path: Path, allowed_parent: Path) -> None:
@@ -93,7 +93,6 @@ def pyinstaller_arguments(
     patcher: Path = PATCHER_STUB,
     uif: Path = UIF_DLL,
     interface_font: Path = INTERFACE_FONT_DIR,
-    unity_fonts: Path = UNITY_FONTS_DIR,
 ) -> list[str]:
     source_root = ROOT / "src"
     entrypoint = ROOT / "src" / "main.py"
@@ -121,8 +120,6 @@ def pyinstaller_arguments(
         "--collect-all=UnityPy",
         "--collect-all=TypeTreeGeneratorAPI",
     ]
-    if unity_fonts.is_dir():
-        arguments.append(f"--add-data={unity_fonts}{os.pathsep}bokucho/unity-fonts")
     arguments.extend(f"--hidden-import={module}" for module in HIDDEN_IMPORTS)
     arguments.extend(f"--exclude-module={module}" for module in EXCLUDED_MODULES)
     return arguments

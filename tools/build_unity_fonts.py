@@ -27,7 +27,7 @@ from fetch_typeset_fonts import SHIPPED_FONTS, _download, _fetch  # noqa: E402
 from bokucho.engines.unity import font_bundle  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_DESTINATION = ROOT / "build" / "unity-fonts"
+DEFAULT_DESTINATION = ROOT / "unity-fonts"  # kept in the repository
 DEFAULT_WORK = ROOT / "build" / "unity-font-work"
 DEFAULT_EDITORS = Path(r"C:\Program Files\Unity\Hub\Editor")
 BUILDER = Path(__file__).resolve().parent / "unity_fonts" / "BokuchoFontBuilder.cs"

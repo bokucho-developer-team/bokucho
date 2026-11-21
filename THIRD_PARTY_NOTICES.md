@@ -51,6 +51,7 @@ Bokucho source repository.
 | 851 Tegaki Zatsu, 0.883 | Font shipped in `fonts/` for typesetting pictures | The author's own terms: free use and redistribution, not sold on its own |
 | GenEi Antique (`GenEiAntiqueNv6-M`), v6.0a | Font shipped in `fonts/` for typesetting pictures | SIL Open Font License 1.1 |
 | jf open huninn, 2.1 | Font shipped in `fonts/` for typesetting pictures | SIL Open Font License 1.1; its Hanzi derive from Kosugi Maru under Apache-2.0 |
+| TextMesh Pro font assets in `unity-fonts/`, drawn from GenYoGothic2 TW by `tools/build_unity_fonts.py` | Fallback font a Unity patch carries, with `licenses/GenYo-GenWan-OFL.txt`, so CJK text does not show as boxes | SIL Open Font License 1.1 |
 
 Upstream project and source information:
 

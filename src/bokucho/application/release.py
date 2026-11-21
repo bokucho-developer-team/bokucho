@@ -702,11 +702,14 @@ def bundled_uif(candidates: Sequence[Path] | None = None) -> Path | None:
 
 
 def bundled_unity_fonts() -> Path:
-    """The TextMesh Pro fallback fonts tools/build_unity_fonts.py built, one per Unity year."""
-    bundled = getattr(sys, "_MEIPASS", None)
-    if bundled:
-        return Path(bundled) / "bokucho" / "unity-fonts"
-    return Path(__file__).resolve().parents[3] / "build" / "unity-fonts"
+    """The TextMesh Pro fallback fonts tools/build_unity_fonts.py built, one per Unity year.
+
+    They sit beside Bokucho.exe in the portable folder, not inside it: 30 MB each
+    would be unpacked on every start.
+    """
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent / "unity-fonts"
+    return Path(__file__).resolve().parents[3] / "unity-fonts"
 
 
 def check_original(project: Project, game_path: Path, *, record: bool = True) -> str:

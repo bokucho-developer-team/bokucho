@@ -207,8 +207,10 @@ def test_the_patch_carries_each_translated_texture_under_its_xunity_name(
 def test_a_text_mesh_pro_game_gets_the_fallback_font_of_its_unity_year(
     tmp_path, monkeypatch
 ) -> None:
-    fonts = tmp_path / "fonts"
+    fonts = tmp_path / "unity-fonts"
     fonts.mkdir()
+    (tmp_path / "licenses").mkdir()
+    (tmp_path / "licenses" / "GenYo-GenWan-OFL.txt").write_text("SIL OFL 1.1", "utf-8")
     (fonts / "bokucho_tc_sdf_u2019").write_bytes(b"UnityFS font")
     (fonts / "bokucho_tc_sdf_u2021").write_bytes(b"UnityFS other")
     monkeypatch.setattr(release, "bundled_unity_fonts", lambda: fonts)
@@ -220,6 +222,8 @@ def test_a_text_mesh_pro_game_gets_the_fallback_font_of_its_unity_year(
     patch = read_patch(build_patch(_project(tmp_path, game), stub=stub).executable.read_bytes())
     with ZipFile(BytesIO(patch.mount)) as archive:
         assert archive.read("BepInEx/fonts/bokucho_tc_sdf_u2019") == b"UnityFS font"
+        # The face's license travels with the atlas drawn from it.
+        assert archive.read("BepInEx/fonts/GenYo-GenWan-OFL.txt") == b"SIL OFL 1.1"
         assert "BepInEx/fonts/bokucho_tc_sdf_u2021" not in archive.namelist()
         config = archive.read("BepInEx/config/AutoTranslatorConfig.ini").decode("utf-8")
         assert "FallbackFontTextMeshPro=BepInEx/fonts/bokucho_tc_sdf_u2019\n" in config
