@@ -577,7 +577,7 @@ class Api:
     def quality(self) -> dict:
         """The current findings, checked against what is in memory right now."""
         project = self._require_project()
-        report = qa_report(project, self.state.string_files)
+        report = qa_report(project, self.state.string_files, memo=self.state.qa_memo)
         values = self._value_issues(project)
         return {
             "status_counts": {

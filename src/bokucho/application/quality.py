@@ -9,6 +9,7 @@ from collections.abc import Callable, Iterable, Iterator
 from dataclasses import asdict, dataclass
 from functools import cache, lru_cache
 from pathlib import Path
+from typing import Literal
 
 from bokucho.application.contracts import CancellationToken, NeverCancelled
 from bokucho.application.errors import InvalidProject
@@ -143,12 +144,55 @@ def _script_findings(string_files: list[StringFile]) -> Iterator[Issue]:
                 )
 
 
-def qa_report(project: Project, string_files: Iterable[StringFile]) -> QaReport:
+_Severity = Literal["error", "warning"]
+_UnitFindings = tuple[tuple[Finding, _Severity], ...]
+_UnitKey = tuple[tuple[str, str, str, bool, bool], str, str, str, int | None]
+QaMemo = dict[_UnitKey, _UnitFindings]
+
+
+def _unit_findings(
+    unit: TextUnit,
+    hans_convert: Callable[[str], str] | None,
+    reject_echo: bool,
+    brackets: bool,
+    project: Project,
+) -> _UnitFindings:
+    """One translated unit's own findings, errors before warnings."""
+    config = project.config
+    errors = check_unit(
+        unit,
+        hans_convert,
+        reject_echo,
+        config.engine.type,
+        config.target_lang,
+        config.source_lang,
+    )
+    warnings = [
+        *format_warnings(unit.source, unit.target),
+        *(unquoted_sounds(unit.source, unit.target) if brackets else ()),
+    ]
+    return (
+        *((finding, "error") for finding in errors),
+        *((finding, "warning") for finding in warnings),
+    )
+
+
+def qa_report(
+    project: Project, string_files: Iterable[StringFile], memo: QaMemo | None = None
+) -> QaReport:
     """Evaluate the units handed in, reading nothing from disk."""
     string_files = list(string_files)
     hans_convert = hans_converter(project.config.target_lang)
     brackets = _compares_brackets(project)
     reject_echo = project.config.source_lang != project.config.target_lang
+    config_key = (
+        project.config.engine.type,
+        project.config.source_lang,
+        project.config.target_lang,
+        reject_echo,
+        brackets,
+    )
+    used: QaMemo = {}
     counts: Counter[Status] = Counter()
     issues: list[Issue] = []
     for string_file in string_files:
@@ -156,23 +200,19 @@ def qa_report(project: Project, string_files: Iterable[StringFile]) -> QaReport:
             counts[unit.status] += 1
             if not unit.target:
                 continue
+            if memo is None:
+                found = _unit_findings(unit, hans_convert, reject_echo, brackets, project)
+            else:
+                # A unit's own findings depend on its source, target, kind and length
+                # limit, and on the project's engine, languages and bracket rule.
+                key = (config_key, unit.source, unit.target, unit.kind, unit.context.max_length)
+                found = memo.get(key)
+                if found is None:
+                    found = _unit_findings(unit, hans_convert, reject_echo, brackets, project)
+                used[key] = found
             issues.extend(
-                Issue.of(string_file.source_file, unit.id, finding)
-                for finding in check_unit(
-                    unit,
-                    hans_convert,
-                    reject_echo,
-                    project.config.engine.type,
-                    project.config.target_lang,
-                    project.config.source_lang,
-                )
-            )
-            issues.extend(
-                Issue.of(string_file.source_file, unit.id, finding, severity="warning")
-                for finding in [
-                    *format_warnings(unit.source, unit.target),
-                    *(unquoted_sounds(unit.source, unit.target) if brackets else ()),
-                ]
+                Issue.of(string_file.source_file, unit.id, finding, severity)
+                for finding, severity in found
             )
         if brackets:
             issues.extend(
@@ -181,6 +221,9 @@ def qa_report(project: Project, string_files: Iterable[StringFile]) -> QaReport:
                 for unit_id, finding in found.findings
             )
     issues.extend(_script_findings(string_files))
+    if memo is not None:
+        memo.clear()
+        memo.update(used)
     if not counts:
         raise InvalidProject("No text units found. Run `bokucho extract` first.")
     return QaReport(

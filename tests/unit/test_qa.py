@@ -6,6 +6,7 @@ import pytest
 from typer.testing import CliRunner
 
 from bokucho import cli
+from bokucho.application.errors import InvalidProject
 from bokucho.application.quality import qa_report
 from bokucho.application.verify import verify_project
 from bokucho.model import Context, Status, StringFile, TextUnit
@@ -618,3 +619,67 @@ def test_script_marks_point_at_a_placeholder_the_source_does_not_have():
     marks = problem_marks("%sが出現！", "%s和%d出現了！", engine="rpgmaker-vx", script=True)
     assert marks == ["%d"]
     assert problem_marks("%sが出現！", "%s和%d出現了！", engine="rpgmaker-vx") == []
+
+
+def _memo_units():
+    return [
+        TextUnit(id="u1", source="%name%は言った", target="名前", status=Status.MT),
+        TextUnit(id="u2", source="一行\n二行", target="併成一行", status=Status.MT),
+        TextUnit(id="u3", source="おはよう", target="早安", status=Status.MT),
+        TextUnit(
+            id="u4", source="こんにちは", target="你好嗎朋友", context=Context(max_length=3)
+        ),
+    ]
+
+
+def test_a_memoed_run_twice_reports_what_a_run_without_one_reports(tmp_path):
+    project = _project(tmp_path, _memo_units())
+    files = project.load_string_files()
+    plain = qa_report(project, files).issues
+    memo = {}
+
+    assert qa_report(project, files, memo=memo).issues == plain
+    assert qa_report(project, files, memo=memo).issues == plain
+    assert {i.unit_id for i in plain} == {"u1", "u2", "u4"}
+
+
+def test_a_memoed_run_reports_a_target_changed_since_the_last_one(tmp_path):
+    project = _project(tmp_path, _memo_units())
+    files = project.load_string_files()
+    memo = {}
+    qa_report(project, files, memo=memo)
+
+    files[0].units[0].target = "%name%說"
+    files[0].units[2].target = "おはよう"
+    changed = qa_report(project, files, memo=memo).issues
+
+    assert changed == qa_report(project, files).issues
+    assert "u1" not in {i.unit_id for i in changed}
+    assert [(i.unit_id, i.code) for i in changed if i.unit_id == "u3"] == [("u3", "echo")]
+    assert len(memo) == 4
+
+
+def test_a_memoed_run_reports_a_language_changed_since_the_last_one(tmp_path):
+    project = _project(
+        tmp_path, [TextUnit(id="u1", source="おはよう", target="おはよう", status=Status.MT)]
+    )
+    files = project.load_string_files()
+    memo = {}
+    assert [i.code for i in qa_report(project, files, memo=memo).issues] == ["echo"]
+
+    project.config.source_lang = project.config.target_lang
+    after = qa_report(project, files, memo=memo).issues
+
+    assert after == qa_report(project, files).issues
+    assert "echo" not in {i.code for i in after}
+
+
+def test_a_memoed_run_that_finds_no_units_leaves_the_memo_empty(tmp_path):
+    project = _project(tmp_path, _memo_units())
+    memo = {}
+    qa_report(project, project.load_string_files(), memo=memo)
+    assert memo
+
+    with pytest.raises(InvalidProject):
+        qa_report(project, [], memo=memo)
+    assert memo == {}

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from bokucho.application.errors import InvalidProject
 from bokucho.application.projects import resolve_game_path, string_filename
+from bokucho.application.quality import QaMemo
 from bokucho.application.replace import ReplacePreview, ReplaceUndo
 from bokucho.application.suggestions import TranslationMemory
 from bokucho.language import source_language_index
@@ -49,6 +50,7 @@ class AppState:
         self.replace_preview: tuple[str, str, ReplacePreview] | None = None
         #: (what it was made from, the game's value analysis or None if it failed).
         self.value_analysis: tuple[object, object | None] | None = None
+        self.qa_memo: QaMemo = {}
 
     def analysed_values(self) -> object | None:
         """The game's value analysis, if one was made from the game as it is now."""
