@@ -169,6 +169,28 @@ def test_queue_language_filter_uses_loaded_index(
     assert [row["id"] for row in api.unit_rows(source_lang="en")["rows"]] == ["english"]
 
 
+def test_queue_language_filter_falls_back_to_detection_when_no_language_is_indexed(
+    api: Api,
+) -> None:
+    api.state.string_files = [
+        StringFile(source_file="scene", units=[
+            TextUnit(
+                id="japanese",
+                source="これは日本語の文章です。新しい冒険を一緒に始めましょう。",
+            ),
+            TextUnit(
+                id="english",
+                source="Welcome to the village. Let us begin our adventure together.",
+            ),
+        ]),
+    ]
+    assert not api.state.source_languages
+
+    assert [row["id"] for row in api.unit_rows(source_lang="ja")["rows"]] == ["japanese"]
+    assert api.next_unit("scene", "japanese", source_lang="en")["id"] == "english"
+    assert api.next_unit("scene", "japanese", source_lang="ja") is None
+
+
 def test_unit_rows_only_materializes_the_requested_slice(
     api: Api,
     tmp_path: Path,

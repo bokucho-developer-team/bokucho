@@ -341,6 +341,15 @@ class Api:
             ),
         }
 
+    def _indexed_languages(self, source_lang: str | None) -> set[str]:
+        if not source_lang:
+            return set()
+        return {
+            language
+            for language in self.state.source_languages
+            if matches_language_tag(language, source_lang)
+        }
+
     def _unit_matches(
         self,
         source_file: str,
@@ -351,6 +360,8 @@ class Api:
         category: str | None = None,
         engine: str = "",
         source_lang: str | None = None,
+        *,
+        indexed_languages: set[str],
     ) -> bool:
         """Whether a unit survives the queue's filters."""
         if not _has_words(unit):
@@ -360,16 +371,11 @@ class Api:
         if category is not None and _category(unit, engine) != category:
             return False
         if source_lang:
-            indexed = {
-                language
-                for language in self.state.source_languages
-                if matches_language_tag(language, source_lang)
-            }
-            if indexed:
+            if indexed_languages:
                 unit_languages = self.state.source_language_index.get(
                     (source_file, unit.id), frozenset()
                 )
-                if unit_languages.isdisjoint(indexed):
+                if unit_languages.isdisjoint(indexed_languages):
                     return False
             elif not any(
                 matches_source_language(line.strip(), source_lang)
@@ -545,6 +551,7 @@ class Api:
     ) -> dict:
         needle = q.casefold() if q else None
         engine = self._engine()
+        indexed_languages = self._indexed_languages(source_lang)
         first = max(0, offset)
         last = first + max(0, limit)
         total = 0
@@ -554,6 +561,7 @@ class Api:
                 if not self._unit_matches(
                     string_file.source_file,
                     unit, status, needle, scope, category, engine, source_lang,
+                    indexed_languages=indexed_languages,
                 ):
                     continue
                 if first <= total < last:
@@ -709,9 +717,11 @@ class Api:
 
         needle = q.casefold() if q else None
         engine = self._engine()
+        indexed_languages = self._indexed_languages(source_lang)
         for owner, unit in ordered[current_index + 1 :]:
             if self._unit_matches(
                 owner, unit, status, needle, scope, category, engine, source_lang,
+                indexed_languages=indexed_languages,
             ):
                 return self._unit_row(owner, unit)
         return None
