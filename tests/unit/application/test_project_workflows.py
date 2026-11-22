@@ -8,6 +8,7 @@ from bokucho.application.contracts import CancellationFlag
 from bokucho.application.errors import InvalidProject, JobCancelled
 from bokucho.application.projects import (
     CreateProjectRequest,
+    _merged_extract,
     create_project,
     extract_text,
     inject_translations,
@@ -16,7 +17,7 @@ from bokucho.application.projects import (
 )
 from bokucho.application.text import save_target, set_status
 from bokucho.engines.base import EngineAdapter
-from bokucho.model import Status, TextUnit
+from bokucho.model import Status, StringFile, TextUnit
 from bokucho.project import Project
 
 
@@ -177,3 +178,16 @@ def test_a_script_address_holding_another_literal_starts_over_and_keeps_the_old_
     unit = strings.by_id("Scripts:s0:1:7")
     assert (unit.source, unit.status, unit.target) == ("Miss", Status.IGNORED, "")
     assert [entry.target for entry in unit.history] == ["回到標題"]
+
+
+def test_merging_over_two_previous_units_sharing_an_id_uses_the_first() -> None:
+    previous = StringFile(
+        source_file="a",
+        units=[
+            TextUnit(id="a:1", source="one", target="first"),
+            TextUnit(id="a:1", source="one", target="second"),
+        ],
+    )
+    merged, counts = _merged_extract(previous, [TextUnit(id="a:1", source="one")])
+    assert [unit.target for unit in merged] == ["first"]
+    assert counts == (0, 1, 0)

@@ -312,13 +312,13 @@ def _merge_unit(existing: TextUnit, extracted: TextUnit) -> TextUnit:
     return merged
 
 
-def _stitched(unit: TextUnit, previous: StringFile) -> TextUnit:
+def _stitched(unit: TextUnit, previous: dict[str, TextUnit]) -> TextUnit:
     """A unit made of pieces the project held separately, given their work."""
     parts = unit.engine_ref.get("parts")
     if not parts:
         return unit
     pieces = {
-        part["block"]: previous.by_id(part["block"]) for part in parts if "block" in part
+        part["block"]: previous.get(part["block"]) for part in parts if "block" in part
     }
     if any(piece is None for piece in pieces.values()):
         return unit
@@ -392,13 +392,16 @@ def _merged_extract(
     """The fresh units over the file on disk, and how many were added, kept and gone."""
     if previous is None:
         return grouped, (len(grouped), 0, 0)
+    by_id: dict[str, TextUnit] = {}
+    for unit in previous.units:
+        by_id.setdefault(unit.id, unit)
     merged: list[TextUnit] = []
     added = kept = 0
     seen = set()
     for unit in grouped:
-        before = previous.by_id(unit.id)
+        before = by_id.get(unit.id)
         if before is None:
-            merged.append(_stitched(unit, previous))
+            merged.append(_stitched(unit, by_id))
             added += 1
         else:
             merged.append(_merge_unit(before, unit))
