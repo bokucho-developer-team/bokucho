@@ -32,6 +32,7 @@ from bokucho.application.contracts import (
 )
 from bokucho.application.errors import InvalidProject, MissingDependency
 from bokucho.engines.base import EngineAdapter, unpacked_from, unpacked_stamp
+from bokucho.engines.unity_bundle import load_assets
 from bokucho.engines.unity_il2cpp import METADATA, metadata_string_literals
 from bokucho.language import matches_source_language, normalize_language_tag
 from bokucho.model import Context, Status, TextUnit
@@ -767,12 +768,12 @@ class UnityAdapter(EngineAdapter):
     ) -> Iterator[tuple[str, str, str, str]]:
         """(file, kind, asset name, text) for every string in the game's assets."""
         try:
-            import UnityPy
+            import UnityPy  # noqa: F401
         except ImportError as exc:
             raise ImportError(
                 'Unity support needs UnityPy. Install it with: pip install "bokucho[unity]"'
             ) from exc
-        env = UnityPy.load(str(layout.data))
+        env = load_assets(layout.data)
         if not env.objects:
             return
         load_type_trees(env, layout)
