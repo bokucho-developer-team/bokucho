@@ -150,6 +150,12 @@ _UnitKey = tuple[tuple[str, str, str, bool, bool], str, str, str, int | None]
 QaMemo = dict[_UnitKey, _UnitFindings]
 
 
+def _unit_key(config_key: tuple[str, str, str, bool, bool], unit: TextUnit) -> _UnitKey:
+    """What a unit's own findings depend on: its source, target, kind and length limit,
+    and the project's engine, languages and bracket rule."""
+    return (config_key, unit.source, unit.target, unit.kind, unit.context.max_length)
+
+
 def _unit_findings(
     unit: TextUnit,
     hans_convert: Callable[[str], str] | None,
@@ -203,12 +209,14 @@ def qa_report(
             if memo is None:
                 found = _unit_findings(unit, hans_convert, reject_echo, brackets, project)
             else:
-                # A unit's own findings depend on its source, target, kind and length
-                # limit, and on the project's engine, languages and bracket rule.
-                key = (config_key, unit.source, unit.target, unit.kind, unit.context.max_length)
+                key = _unit_key(config_key, unit)
                 found = memo.get(key)
                 if found is None:
-                    found = _unit_findings(unit, hans_convert, reject_echo, brackets, project)
+                    # A draft can be saved while the report runs: an entry's key and
+                    # findings come from one copy of the unit.
+                    snapshot = unit.model_copy()
+                    key = _unit_key(config_key, snapshot)
+                    found = _unit_findings(snapshot, hans_convert, reject_echo, brackets, project)
                 used[key] = found
             issues.extend(
                 Issue.of(string_file.source_file, unit.id, finding, severity)

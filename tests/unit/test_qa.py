@@ -6,6 +6,7 @@ import pytest
 from typer.testing import CliRunner
 
 from bokucho import cli
+from bokucho.application import quality
 from bokucho.application.errors import InvalidProject
 from bokucho.application.quality import qa_report
 from bokucho.application.verify import verify_project
@@ -672,6 +673,37 @@ def test_a_memoed_run_reports_a_language_changed_since_the_last_one(tmp_path):
 
     assert after == qa_report(project, files).issues
     assert "echo" not in {i.code for i in after}
+
+
+def test_a_draft_saved_during_a_memoed_run_leaves_later_runs_reporting_its_twin(
+    tmp_path, monkeypatch
+):
+    project = _project(
+        tmp_path,
+        [
+            TextUnit(id="u1", source="おはよう", target="おはよう", status=Status.MT),
+            TextUnit(id="u2", source="おはよう", target="おはよう", status=Status.MT),
+        ],
+    )
+    files = project.load_string_files()
+    saved = files[0].units[1]
+    check_unit = quality.check_unit
+    checked = []
+
+    def check_while_a_draft_is_saved(unit, *args):
+        checked.append(unit.id)
+        if checked == ["u1", "u2"]:
+            saved.target = "早安"
+        return check_unit(unit, *args)
+
+    memo = {}
+    monkeypatch.setattr(quality, "check_unit", check_while_a_draft_is_saved)
+    qa_report(project, files, memo=memo)
+    monkeypatch.undo()
+
+    after = qa_report(project, files, memo=memo).issues
+    assert after == qa_report(project, files).issues
+    assert [(i.unit_id, i.code) for i in after] == [("u1", "echo")]
 
 
 def test_a_memoed_run_that_finds_no_units_leaves_the_memo_empty(tmp_path):
