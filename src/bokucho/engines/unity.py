@@ -321,6 +321,28 @@ def _strings(value: object, key: str = "") -> Iterator[str]:
             yield from _strings(item, key)
 
 
+def parsed_tree(obj: Any) -> dict[str, Any]:
+    """The fields of a UnityPy object, read with its Python type tree reader.
+
+    A type tree generated from the game's code can disagree with the stored bytes.
+    UnityPy's C reader allocates an array at whatever length it reads before checking
+    that the bytes exist, while its Python reader fails at the end of the data. A tree
+    that does not consume exactly the object's bytes does not describe it.
+    """
+    from UnityPy.helpers.TypeTreeHelper import read_typetree
+
+    node = obj._get_typetree_node()
+    obj.reset()
+    start = obj.reader.Position
+    tree = read_typetree(
+        node, obj.reader, as_dict=True, check_read=False, assetsfile=obj.assets_file
+    )
+    read = obj.reader.Position - start
+    if read != obj.byte_size:
+        raise ValueError(f"type tree read {read} bytes of an object of {obj.byte_size} bytes")
+    return tree
+
+
 def unit_id(source: str) -> str:
     """One id per distinct source text, as XUnity looks translations up by text."""
     return "u_" + hashlib.sha1(source.encode("utf-8")).hexdigest()[:16]
@@ -760,7 +782,7 @@ class UnityAdapter(EngineAdapter):
             if kind not in ("TextAsset", "MonoBehaviour"):
                 continue
             try:
-                tree = obj.parse_as_dict()
+                tree = parsed_tree(obj)
             except Exception:  # noqa: BLE001 - UnityPy raises anything on a tree it cannot read
                 yield obj.assets_file.name, "unreadable", "", ""
                 continue

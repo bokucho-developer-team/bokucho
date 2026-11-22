@@ -1,6 +1,7 @@
 """Tests for the Unity engine adapter."""
 
 import struct
+import tracemalloc
 from types import SimpleNamespace
 
 import pytest
@@ -14,6 +15,7 @@ from bokucho.engines.unity import (
     UnityAdapter,
     UnityLayout,
     encode_entry,
+    parsed_tree,
     text_asset_body,
     text_asset_strings,
     translated_texture_name,
@@ -638,3 +640,55 @@ def test_translation_file_also_matches_a_label_the_game_upper_cases():
     assert "BACK=上一頁" in lines and "BACK=返回" not in lines  # a real source wins
     assert not any(line.startswith("はい=") and line != "はい=是" for line in lines)
     assert not any(line.startswith("GO ") for line in lines)
+
+
+def vector_object(data: bytes):
+    """A stand-in UnityPy object whose type tree is a vector of one-int entries."""
+    streams = pytest.importorskip("UnityPy.streams")
+    node_class = pytest.importorskip("UnityPy.helpers.TypeTreeNode").TypeTreeNode
+    node = node_class.from_list(
+        [
+            {"m_Level": level, "m_Type": kind, "m_Name": name, "m_MetaFlag": 0}
+            for level, kind, name in [
+                (0, "MonoBehaviour", "Base"),
+                (1, "vector", "items"),
+                (2, "Array", "Array"),
+                (3, "int", "size"),
+                (3, "Entry", "data"),
+                (4, "int", "value"),
+            ]
+        ]
+    )
+    reader = streams.EndianBinaryReader(data, endian="<")
+
+    def reset():
+        reader.Position = 0
+
+    return SimpleNamespace(
+        _get_typetree_node=lambda: node,
+        reader=reader,
+        reset=reset,
+        byte_size=len(data),
+        assets_file=None,
+    )
+
+
+def test_parsed_tree_reads_the_fields_of_an_object():
+    assert parsed_tree(vector_object(struct.pack("<ii", 1, 7))) == {"items": [{"value": 7}]}
+
+
+def test_a_corrupt_array_length_fails_without_allocating_it():
+    obj = vector_object(struct.pack("<ii", 10_000_000, 7))
+    tracemalloc.start()
+    try:
+        with pytest.raises((struct.error, EOFError)):
+            parsed_tree(obj)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert peak < 1_000_000
+
+
+def test_a_tree_that_leaves_bytes_of_the_object_unread_is_rejected():
+    with pytest.raises(ValueError, match="read 8 bytes of an object of 12 bytes"):
+        parsed_tree(vector_object(struct.pack("<iii", 1, 7, 0)))
