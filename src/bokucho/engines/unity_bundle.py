@@ -22,6 +22,9 @@ _STORED_ARCHIVE = 0x40
 _STORED_FORMAT = 7
 _ALIGNMENT = 16
 _MAX_OUTPUT_BLOCK = 1 << 30
+# No LZ4 block decodes to more than 255 times its compressed size; an archive declaring
+# more for a block that must be read is left to UnityPy.
+_MAX_EXPANSION = 255
 
 
 class _Block(NamedTuple):
@@ -166,6 +169,7 @@ def without_streamed_data(path: Path) -> bytes | bytearray | None:
     only streamed data is never read or decompressed.
     """
     from UnityPy.environment import reSplit
+    from UnityPy.helpers.CompressionHelper import DECOMPRESSION_MAP
 
     if reSplit.match(str(path)):
         return None
@@ -204,19 +208,25 @@ def without_streamed_data(path: Path) -> bytes | bytearray | None:
             uncompressed += block.uncompressed_size
             compressed += block.compressed_size
 
-        size = sum(node.size for node in kept)
-        output = _stored_archive(archive, kept, size)
-        data_start = len(output) - size
         overlapping: dict[int, list[tuple[_Node, int]]] = {}
-        placed = data_start
+        size = 0
         for node in kept:
             if node.size:
                 first = bisect.bisect_right(uncompressed_starts, node.offset) - 1
                 last = bisect.bisect_left(uncompressed_starts, node.offset + node.size) - 1
                 for index in range(first, last + 1):
                     if blocks[index].uncompressed_size:
-                        overlapping.setdefault(index, []).append((node, placed))
-            placed += node.size
+                        overlapping.setdefault(index, []).append((node, size))
+            size += node.size
+
+        if size > sum(blocks[index].uncompressed_size for index in overlapping) or any(
+            blocks[index].flags & _COMPRESSION_MASK not in DECOMPRESSION_MAP
+            or blocks[index].uncompressed_size > _MAX_EXPANSION * blocks[index].compressed_size
+            for index in overlapping
+        ):
+            return None
+        output = _stored_archive(archive, kept, size)
+        data_start = len(output) - size
 
         for index in sorted(overlapping):
             block = blocks[index]
@@ -231,9 +241,8 @@ def without_streamed_data(path: Path) -> bytes | bytearray | None:
             for node, target in overlapping[index]:
                 lower = max(node.offset, start)
                 upper = min(node.offset + node.size, start + block.uncompressed_size)
-                output[target + lower - node.offset : target + upper - node.offset] = view[
-                    lower - start : upper - start
-                ]
+                at = data_start + target + lower - node.offset
+                output[at : at + upper - lower] = view[lower - start : upper - start]
             del data, view
         return output
 

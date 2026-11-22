@@ -1,5 +1,6 @@
 """Tests for reading Unity archives without their streamed bulk data."""
 
+import lzma
 import re
 import struct
 import tracemalloc
@@ -14,7 +15,7 @@ lz4_block = pytest.importorskip("lz4.block")
 from bokucho.engines import unity_bundle  # noqa: E402
 from bokucho.engines.unity_bundle import load_assets, without_streamed_data  # noqa: E402
 
-STORED, LZ4 = 0, 2
+STORED, LZMA, LZ4 = 0, 1, 2
 Node = tuple[str, bytes, int]
 
 
@@ -341,6 +342,80 @@ def test_a_block_that_decompresses_to_another_size_is_left_to_UnityPy(tmp_path):
 def test_a_kept_block_in_a_compression_UnityPy_cannot_read_is_left_to_UnityPy(tmp_path):
     lzham = 4
     (tmp_path / "data.unity3d").write_bytes(build_archive(NODES, block_methods=(lzham,)))
+    assert without_streamed_data(tmp_path / "data.unity3d") is None
+
+
+def peak_of_without_streamed_data(path: Path) -> tuple[bytes | bytearray | None, int]:
+    tracemalloc.start()
+    try:
+        result = without_streamed_data(path)
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    return result, peak
+
+
+def declare_first_block_and_node_size(raw: bytes, size: int) -> bytes:
+    """The archive with the uncompressed size of its first block and the size of its first
+    node declared as ``size``; the stored block info starts after the aligned header."""
+    patched = bytearray(raw)
+    engine_end = patched.index(b"\0", patched.index(b"\0", 12) + 1)
+    fixed = engine_end + 1 + 20
+    info = fixed + -fixed % 16
+    (block_count,) = struct.unpack_from(">i", patched, info + 16)
+    struct.pack_into(">I", patched, info + 20, size)
+    struct.pack_into(">q", patched, info + 20 + 10 * block_count + 4 + 8, size)
+    return bytes(patched)
+
+
+def test_kept_nodes_that_overlap_beyond_the_blocks_holding_them_are_left_to_UnityPy(tmp_path):
+    nodes = [
+        ("CAB-A", payload("a", 64), 4),
+        ("CAB-A.resS", payload("s", 640), 0),
+        ("CAB-C", payload("c", 64), 4),
+    ]
+    raw = bytearray(build_archive(nodes))
+    at = raw.index(b"CAB-C\0") - 20
+    raw[at : at + 8] = struct.pack(">q", 0)
+    (tmp_path / "data.unity3d").write_bytes(bytes(raw))
+    assert without_streamed_data(tmp_path / "data.unity3d") is None
+
+
+def test_a_kept_block_declaring_more_than_255_times_its_packed_size_is_not_allocated(tmp_path):
+    nodes = [("CAB-1", payload("a", 64), 4), ("CAB-1.resS", payload("s", 64), 0)]
+    raw = declare_first_block_and_node_size(build_archive(nodes), 64 * 1024 * 1024)
+    (tmp_path / "data.unity3d").write_bytes(raw)
+    result, peak = peak_of_without_streamed_data(tmp_path / "data.unity3d")
+    assert result is None
+    assert peak < 1024 * 1024
+
+
+def test_a_kept_block_in_a_compression_missing_from_UnityPy_is_not_allocated(tmp_path):
+    unknown = 5
+    nodes = [("CAB-1", payload("a", 4 * 1024 * 1024), 4), ("CAB-1.resS", payload("s", 64), 0)]
+    raw = build_archive(nodes, block_size=4 * 1024 * 1024, block_methods=(unknown,))
+    (tmp_path / "data.unity3d").write_bytes(raw)
+    result, peak = peak_of_without_streamed_data(tmp_path / "data.unity3d")
+    assert result is None
+    assert peak < 1024 * 1024
+
+
+def lzma_block(data: bytes) -> bytes:
+    filters = [{"id": lzma.FILTER_LZMA1, "dict_size": 1 << 20, "lc": 3, "lp": 0, "pb": 2}]
+    packed = lzma.compress(data, format=lzma.FORMAT_RAW, filters=filters)
+    return struct.pack("<BI", (2 * 5 + 0) * 9 + 3, 1 << 20) + packed
+
+
+def test_a_kept_lzma_block_beyond_255_times_its_packed_size_is_left_to_UnityPy(tmp_path):
+    nodes = [("CAB-1", payload("a", 1024 * 1024), 4), ("CAB-1.resS", payload("s", 64), 0)]
+    raw = build_archive(
+        nodes,
+        block_size=1024 * 1024,
+        block_methods=(LZMA,),
+        mangle=lambda _, chunk: lzma_block(chunk),
+    )
+    assert len(lzma_block(nodes[0][1])) * 255 < len(nodes[0][1])
+    (tmp_path / "data.unity3d").write_bytes(raw)
     assert without_streamed_data(tmp_path / "data.unity3d") is None
 
 
