@@ -32,7 +32,6 @@ from bokucho.application.glossary import (
 from bokucho.application.image_editing import load_image_document
 from bokucho.application.projects import (
     CreateProjectRequest,
-    load_project_summary,
     resolve_game_path,
     string_filename,
 )
@@ -487,13 +486,13 @@ class Api:
             previous_watcher.stop()
         self.state.watcher = ProjectWatcher(self.state, self.events)
         self.state.watcher.start()
-        summary = load_project_summary(self.state.project.root)
+        project = self.state.project
         return {
-            "root": str(summary.root),
-            "name": summary.name,
-            "source_lang": summary.source_lang,
-            "target_lang": summary.target_lang,
-            "engine": summary.engine,
+            "root": str(project.root.resolve()),
+            "name": project.config.name,
+            "source_lang": project.config.source_lang,
+            "target_lang": project.config.target_lang,
+            "engine": project.config.engine.type,
         }
 
     @_wrap_errors
