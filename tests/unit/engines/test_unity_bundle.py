@@ -339,12 +339,6 @@ def test_a_block_that_decompresses_to_another_size_is_left_to_UnityPy(tmp_path):
     assert without_streamed_data(tmp_path / "data.unity3d") is None
 
 
-def test_a_kept_block_in_a_compression_UnityPy_cannot_read_is_left_to_UnityPy(tmp_path):
-    lzham = 4
-    (tmp_path / "data.unity3d").write_bytes(build_archive(NODES, block_methods=(lzham,)))
-    assert without_streamed_data(tmp_path / "data.unity3d") is None
-
-
 def peak_of_without_streamed_data(path: Path) -> tuple[bytes | bytearray | None, int]:
     tracemalloc.start()
     try:
@@ -390,10 +384,10 @@ def test_a_kept_block_declaring_more_than_255_times_its_packed_size_is_not_alloc
     assert peak < 1024 * 1024
 
 
-def test_a_kept_block_in_a_compression_missing_from_UnityPy_is_not_allocated(tmp_path):
-    unknown = 5
+@pytest.mark.parametrize("method", [4, 5], ids=["lzham", "unlisted"])
+def test_a_kept_block_in_a_compression_UnityPy_cannot_read_is_not_allocated(tmp_path, method):
     nodes = [("CAB-1", payload("a", 4 * 1024 * 1024), 4), ("CAB-1.resS", payload("s", 64), 0)]
-    raw = build_archive(nodes, block_size=4 * 1024 * 1024, block_methods=(unknown,))
+    raw = build_archive(nodes, block_size=4 * 1024 * 1024, block_methods=(method,))
     (tmp_path / "data.unity3d").write_bytes(raw)
     result, peak = peak_of_without_streamed_data(tmp_path / "data.unity3d")
     assert result is None

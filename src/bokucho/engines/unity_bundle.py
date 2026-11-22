@@ -168,9 +168,12 @@ def without_streamed_data(path: Path) -> bytes | bytearray | None:
     The other nodes keep their order, paths, flags and bytes. A block holding
     only streamed data is never read or decompressed.
     """
+    from UnityPy.enums.BundleFile import CompressionFlags
     from UnityPy.environment import reSplit
     from UnityPy.helpers.CompressionHelper import DECOMPRESSION_MAP
 
+    # UnityPy lists LZHAM among its decompressors but cannot decode it.
+    readable = set(DECOMPRESSION_MAP) - {CompressionFlags.LZHAM}
     if reSplit.match(str(path)):
         return None
     with path.open("rb") as stream:
@@ -220,7 +223,7 @@ def without_streamed_data(path: Path) -> bytes | bytearray | None:
             size += node.size
 
         if size > sum(blocks[index].uncompressed_size for index in overlapping) or any(
-            blocks[index].flags & _COMPRESSION_MASK not in DECOMPRESSION_MAP
+            blocks[index].flags & _COMPRESSION_MASK not in readable
             or blocks[index].uncompressed_size > _MAX_EXPANSION * blocks[index].compressed_size
             for index in overlapping
         ):
