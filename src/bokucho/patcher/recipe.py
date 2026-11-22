@@ -160,10 +160,25 @@ def _compile_kirikiri(
     out = root / "out"
     report("正在注入翻譯資料。")
     adapter = KiriKiriAdapter(skip, names, archives=archives, skip_labels=labels)
-    inject_translations(project, adapter, out)
-    produced = {path.name: path.read_bytes() for path in sorted(out.glob("*")) if path.is_file()}
+    if any(strings.units for strings in project.load_string_files()):
+        inject_translations(project, adapter, out)
+    # The game finds files by name alone, so scripts and pictures all sit at the root.
+    found: dict[str, str] = {}
+    produced: dict[str, bytes] = {}
+    for path in sorted(out.rglob("*")) if out.is_dir() else ():
+        relative = path.relative_to(out).as_posix()
+        if not path.is_file() or ("/" in relative and path.suffix.lower() not in IMAGE_SUFFIXES):
+            continue
+        key = path.name.casefold()
+        if key in found:
+            raise ValueError(
+                f"{found[key]} and {relative} share one file name, and the game finds files "
+                "by name alone."
+            )
+        found[key] = relative
+        produced[path.name] = path.read_bytes()
     if not produced:
-        raise ValueError("No script has a translated line.")
+        raise ValueError("Nothing to patch: no translated line or picture.")
     report(f"正在建立補丁封包 {slot}。")
     built = root / "build" / slot
     built.parent.mkdir(parents=True, exist_ok=True)

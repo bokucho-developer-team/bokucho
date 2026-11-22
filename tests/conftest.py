@@ -480,17 +480,18 @@ def kirikiri_game():
 
     from bokucho.engines import xp3
 
-    def build(folder, scripts, *, slots="loop", extra=None, padding=0):
+    def build(folder, scripts, *, slots="loop", extra=None, padding=0, files=None):
         folder.mkdir(parents=True, exist_ok=True)
-        files = {
+        stored = {
             "system/Initialize.tjs": _kirikiri_startup(slots),
             "image/bg.png": b"\x89PNG\r\n\x1a\n" + bytes(8),
         }
         for name, text in scripts.items():
-            files[name] = b"\xff\xfe" + text.encode("utf-16-le")
+            stored[name] = b"\xff\xfe" + text.encode("utf-16-le")
+        stored.update(files or {})
         if padding:
-            files["pad.bin"] = random.Random(1).randbytes(padding)
-        xp3.write(folder / "data.xp3", files)
+            stored["pad.bin"] = random.Random(1).randbytes(padding)
+        xp3.write(folder / "data.xp3", stored)
         for archive, contents in (extra or {}).items():
             (folder / archive).parent.mkdir(parents=True, exist_ok=True)
             xp3.write(folder / archive, contents)

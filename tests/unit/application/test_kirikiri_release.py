@@ -9,12 +9,14 @@ from zipfile import ZipFile
 
 import pytest
 
+from bokucho.application.assets import save_image_units
 from bokucho.application.errors import ReleaseBlocked
 from bokucho.application.projects import extract_text
 from bokucho.application.release import release_patcher
 from bokucho.engines import xp3
 from bokucho.engines.kag import decode_script, encode_script
 from bokucho.infrastructure.factories import make_engine_adapter
+from bokucho.model import StringFile
 from bokucho.patcher import core
 from bokucho.patcher.payload import read_patch
 from bokucho.project import Project
@@ -145,5 +147,43 @@ def test_a_speaker_name_with_a_quote_is_not_released(kirikiri_project):
 def test_a_release_with_nothing_translated_is_not_released(kirikiri_project):
     project, _game, stub = kirikiri_project()
     _translate(project, {})
-    with pytest.raises(ReleaseBlocked, match="No script has a translated line"):
+    with pytest.raises(ReleaseBlocked, match="Nothing to patch"):
+        _release(project, stub)
+
+
+def _picture(project, relative, data=b"\x89PNG\r\n\x1a\nX"):
+    path = project.root / "out" / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+
+
+def _recipe_names(project, stub):
+    patch = read_patch(_release(project, stub).executable.read_bytes())
+    with ZipFile(io.BytesIO(patch.recipe)) as recipe:
+        return recipe.namelist()
+
+
+def test_the_recipe_carries_the_pictures_and_not_their_text(kirikiri_project):
+    project, _game, stub = kirikiri_project()
+    _picture(project, "image/title.png")
+    save_image_units(project, StringFile(source_file="images", units=[]))
+    (project.root / "out" / "first.ks").write_bytes(b"\xff\xfe")
+    names = _recipe_names(project, stub)
+    assert "out/image/title.png" in names
+    assert "strings/images.json" not in names
+    assert "out/first.ks" not in names
+
+
+def test_pictures_alone_are_released(kirikiri_project):
+    project, _game, stub = kirikiri_project()
+    _translate(project, {})
+    _picture(project, "rule/op.png")
+    assert "out/rule/op.png" in _recipe_names(project, stub)
+
+
+def test_two_pictures_with_one_name_are_not_released(kirikiri_project):
+    project, _game, stub = kirikiri_project()
+    _picture(project, "image/a.png")
+    _picture(project, "rule/A.png")
+    with pytest.raises(ReleaseBlocked, match="image/a.png"):
         _release(project, stub)

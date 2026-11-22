@@ -25,7 +25,7 @@ Bokucho 是開源的遊戲翻譯工作台。它把遊戲裡的文字和圖片整
 
 | 引擎 | 擷取與回寫 | 補丁帶翻譯圖片 |
 |---|---|---|
-| KiriKiri / KAG（KiriKiri 2 / Z） | 未加密 `.xp3` 封包裡的 `.ks` 劇本與人名 | 否 |
+| KiriKiri / KAG（KiriKiri 2 / Z） | 未加密 `.xp3` 封包裡的 `.ks` 劇本與人名，以及選定資料夾裡的圖片 | 是 |
 | LiveMaker / LiveNovel | 打包或解包的遊戲、劇本、選項、變數顯示文字 | 是 |
 | RPG Maker MV / MZ | JSON 資料、事件文字、選項、plugin note tags | 是 | 
 | RPG Maker XP / VX / VX Ace | `.rxdata`、`.rvdata`、`.rvdata2` 資料，以及 `.rgssad`、`.rgss2a`、`.rgss3a` 封包 | 是 |

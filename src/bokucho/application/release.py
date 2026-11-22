@@ -444,9 +444,10 @@ def _rgss_scripts(layout, name: str) -> tuple[str, bytes | None]:
 
 def _kirikiri_patch(project: Project, work: Path, token: CancellationToken) -> Patch:
     """A recipe the player's patcher compiles into a new patch archive beside the game's."""
-    from bokucho.engines.kirikiri import KiriKiriAdapter, game_layout, scripts
+    from bokucho.engines.kirikiri import game_folder, game_layout, scripts
+    from bokucho.images import IMAGES_STRINGS_FILE
 
-    folder = KiriKiriAdapter.game_root(resolve_game_path(project))
+    folder = game_folder(resolve_game_path(project))
     if (folder / RECORD).is_file():
         raise ReleaseBlocked(
             f"The game folder holds a patch already ({RECORD}). "
@@ -477,11 +478,26 @@ def _kirikiri_patch(project: Project, work: Path, token: CancellationToken) -> P
         "kag_name_attributes": engine.kag_name_attributes or [],
         "kag_skip_labels": engine.kag_skip_labels or [],
     }
+    overlay = project.root / "out"
+    pictures = _overlay_pictures(overlay)
+    #: The patch archive holds every picture at its root, where the game finds it by name.
+    seen: dict[str, str] = {}
+    for relative in pictures:
+        key = relative.rsplit("/", 1)[-1].casefold()
+        if key in seen:
+            raise ReleaseBlocked(
+                f"{seen[key]} and {relative} share one file name, and the game finds pictures "
+                "by name alone. Keep one of them."
+            )
+        seen[key] = relative
     stream = io.BytesIO()
     with ZipFile(stream, "w", compression=ZIP_DEFLATED) as archive:
         archive.writestr("recipe.json", json.dumps(metadata, ensure_ascii=False))
         for path in sorted(project.strings_dir.glob("*.json")):
-            archive.write(path, f"strings/{path.name}")
+            if path.name != IMAGES_STRINGS_FILE:
+                archive.write(path, f"strings/{path.name}")
+        for relative in pictures:
+            archive.write(overlay / relative, f"out/{relative}")
     patch = Patch(_title(project), files, recipe=stream.getvalue())
     _rehearse(patch, folder, work, token)
     token.raise_if_cancelled()

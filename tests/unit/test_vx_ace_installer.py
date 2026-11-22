@@ -409,9 +409,13 @@ def test_restore_takes_away_nothing_outside_the_game_folder(
     record = json.loads((player / RECORD).read_text(encoding="utf-8"))
     record["added"].append({"name": "../outside.txt", "sha256": sha256_of(outside)})
     (player / RECORD).write_text(json.dumps(record), encoding="utf-8")
+    said: list[str] = []
 
-    restore(player, patch, lambda _line: None)
-    assert outside.is_file() and not (player / "Fonts" / "Bokucho-UmePlusGothic.ttf").exists()
+    restore(player, patch, said.append)
+    assert outside.read_bytes() == b"not the patch's"
+    assert not (player / "Fonts" / "Bokucho-UmePlusGothic.ttf").exists()
+    #: Bokucho never writes such an entry, so the player is told the record was damaged.
+    assert any(RECORD in line for line in said)
 
 
 def test_a_different_font_still_gets_the_characters(

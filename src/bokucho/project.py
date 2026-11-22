@@ -104,6 +104,12 @@ class EngineConfig(BaseModel):
     #: KiriKiri: globs on label names (e.g. ``*_chh``) whose text, up to the next label, is
     #: another language's and is skipped.
     kag_skip_labels: list[str] | None = None
+    #: KiriKiri: the archive folders whose pictures are unpacked for translation; unset
+    #: means ``image``, ``system`` and ``rule``.
+    kag_image_folders: list[str] | None = None
+    #: KiriKiri: globs on picture file names (e.g. ``*_chh.*``) that are another language's
+    #: and are not unpacked.
+    kag_skip_images: list[str] | None = None
 
 
 class FontSourceConfig(BaseModel):

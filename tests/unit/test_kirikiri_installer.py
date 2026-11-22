@@ -17,10 +17,11 @@ from bokucho.engines.kirikiri import KiriKiriAdapter, game_layout
 from bokucho.model import StringFile
 from bokucho.patcher import core
 from bokucho.patcher.payload import FileState, Patch, PatchedFile
+from bokucho.patcher.recipe import compile_recipe
 from bokucho.project import Project
 
 
-def _patch(project: Project, game: Path) -> Patch:
+def _patch(project: Project, game: Path, pictures: dict[str, bytes] | None = None) -> Patch:
     layout = game_layout(game)
     engine = project.config.engine
     recipe = {
@@ -38,6 +39,8 @@ def _patch(project: Project, game: Path) -> Patch:
         archive.writestr("recipe.json", json.dumps(recipe, ensure_ascii=False))
         for path in sorted(project.strings_dir.glob("*.json")):
             archive.writestr(f"strings/{path.name}", path.read_bytes())
+        for path, data in (pictures or {}).items():
+            archive.writestr(f"out/{path}", data)
     files = tuple(
         PatchedFile(
             name,
@@ -66,6 +69,49 @@ def _translated(tmp_path: Path, kirikiri_game, **game_options) -> tuple[Project,
 @pytest.fixture
 def translated(tmp_path, kirikiri_game):
     return _translated(tmp_path, kirikiri_game)
+
+
+def _untranslate(project: Project) -> None:
+    for strings in project.load_string_files():
+        for unit in strings.units:
+            unit.target = ""
+        project.save_string_file(strings, f"{strings.source_file}.json")
+
+
+def _compiled(game, patch, scratch):
+    _rebuilt, (added,) = compile_recipe(game, patch, scratch)
+    archive = scratch / "added.xp3"
+    archive.write_bytes(added.data)
+    return {e.name: xp3.read(archive, e) for e in xp3.entries(archive)}
+
+
+def test_the_patch_archive_holds_the_pictures_at_its_root(translated, tmp_path):
+    project, game = translated
+    patch = _patch(project, game, {"image/title.png": b"T", "rule/op.jpg": b"O"})
+    files = _compiled(game, patch, tmp_path / "scratch")
+    assert sorted(files) == ["first.ks", "op.jpg", "title.png"]
+    assert files["title.png"] == b"T" and files["op.jpg"] == b"O"
+
+
+def test_pictures_alone_make_a_patch(translated, tmp_path):
+    project, game = translated
+    _untranslate(project)
+    files = _compiled(game, _patch(project, game, {"image/title.png": b"T"}), tmp_path / "s")
+    assert files == {"title.png": b"T"}
+
+
+def test_nothing_translated_and_no_picture_is_refused(translated, tmp_path):
+    project, game = translated
+    _untranslate(project)
+    with pytest.raises(ValueError, match="Nothing to patch: no translated line or picture."):
+        compile_recipe(game, _patch(project, game), tmp_path / "s")
+
+
+def test_two_pictures_with_one_name_are_refused(translated, tmp_path):
+    project, game = translated
+    patch = _patch(project, game, {"image/a.png": b"1", "rule/A.png": b"2"})
+    with pytest.raises(ValueError, match="image/a.png.*rule/A.png|rule/A.png.*image/a.png"):
+        compile_recipe(game, patch, tmp_path / "s")
 
 
 def test_applying_adds_a_patch_archive_and_leaves_the_game_archive(translated):
@@ -175,3 +221,39 @@ def test_the_disk_check_counts_only_what_is_added(tmp_path, kirikiri_game, monke
     )
     core.apply(game, _patch(project, game))
     assert (game / "patch.xp3").is_file()
+
+
+@pytest.mark.parametrize(
+    "record", ['{"added": [{"name": "patch.xp3", "sha', '{"added": null}'], ids=["cut", "null"]
+)
+def test_a_damaged_record_stops_restore_before_it_changes_anything(translated, record):
+    project, game = translated
+    patch = _patch(project, game)
+    core.apply(game, patch)
+    (game / core.RECORD).write_text(record, encoding="utf-8")
+    before = {path.name: path.read_bytes() for path in game.iterdir()}
+
+    core.inspect(game, patch)  # the window asks this as soon as the folder is chosen
+    with pytest.raises(core.PatchError, match=core.RECORD):
+        core.restore(game, patch)
+    assert {path.name: path.read_bytes() for path in game.iterdir()} == before
+
+
+@pytest.mark.parametrize(
+    "record", ['{"added": [{"name": "patch.xp3", "sha', '{"added": null}'], ids=["cut", "null"]
+)
+def test_a_damaged_record_is_told_before_apply_is_offered(translated, record):
+    project, game = translated
+    patch = _patch(project, game)
+    core.apply(game, patch)
+    (game / core.RECORD).write_text(record, encoding="utf-8")
+    before = {path.name: path.read_bytes() for path in game.iterdir()}
+
+    found = core.inspect(game, patch)
+    #: The window offers 套用 only for ORIGINAL, and 還原 only when restorable.
+    assert found.state is not core.State.ORIGINAL and not found.restorable
+    assert core.RECORD in core.describe(found, patch)
+    with pytest.raises(core.PatchError) as refused:
+        core.apply(game, patch)
+    assert str(refused.value) == core.describe(found, patch)
+    assert {path.name: path.read_bytes() for path in game.iterdir()} == before

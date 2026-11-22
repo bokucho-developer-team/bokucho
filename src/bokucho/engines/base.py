@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from pathlib import Path
 
 from bokucho.application.contracts import (
@@ -101,12 +102,16 @@ class EngineAdapter(ABC):
         destination: Path,
         sink: ProgressSink = _NULL_PROGRESS,
         token: CancellationToken = _NEVER_CANCELLED,
+        *,
+        image_folders: Sequence[str] | None = None,
+        skip_images: Sequence[str] = (),
     ) -> None:
         """Write the pictures a packed game keeps inside other files to ``destination``.
 
         Most engines keep their pictures as files, which extraction unpacks with the text.
+        ``image_folders`` and ``skip_images`` choose pictures where an engine can.
         """
-        del game_path, destination, sink, token
+        del game_path, destination, sink, token, image_folders, skip_images
 
     @abstractmethod
     def extract(

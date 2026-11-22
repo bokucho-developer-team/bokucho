@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import hashlib
 import os
+from dataclasses import replace
 from pathlib import Path
 
+import pytest
+
 from bokucho.patcher.__main__ import main
-from bokucho.patcher.core import apply, default_folder, restore
+from bokucho.patcher.core import RECORD, apply, default_folder, restore
 from bokucho.patcher.delta import make_delta
-from bokucho.patcher.payload import FileState, Patch, PatchedFile, patch_executable
+from bokucho.patcher.payload import FileState, Patch, PatchAdded, PatchedFile, patch_executable
 
 ORIGINAL = b"original game " * 4096
 TRANSLATED = b"translated game " * 4096
@@ -105,3 +108,43 @@ def test_a_restore_cut_short_can_be_finished(tmp_path: Path) -> None:
     assert (game / "Game.exe").read_bytes() == ORIGINAL
     assert (game / "data.bin").read_bytes() == data
     assert not list(game.glob("*.bak"))
+
+
+@pytest.mark.parametrize(
+    "record",
+    ['{"added": [{"name": "font.ttf", "sha', '{"added": null}', "[]"],
+    ids=["cut", "null", "not-an-object"],
+)
+def test_a_damaged_record_still_lets_the_originals_back(tmp_path: Path, record: str) -> None:
+    game = tmp_path / "game"
+    game.mkdir()
+    (game / "Game.exe").write_bytes(ORIGINAL)
+    patch = replace(_patch(), added=(PatchAdded("font.ttf", b"font"),))
+    apply(game, patch)
+    (game / RECORD).write_text(record, encoding="utf-8")
+    said: list[str] = []
+
+    restore(game, patch, said.append)
+
+    #: The backups are whole, so the game goes back; what was added can no longer be told.
+    assert {path.name: path.read_bytes() for path in game.iterdir()} == {
+        "Game.exe": ORIGINAL,
+        "font.ttf": b"font",
+    }
+    assert any(RECORD in line for line in said)
+
+
+def test_restore_without_the_window_says_the_record_was_damaged(tmp_path: Path, capsys) -> None:
+    game = tmp_path / "game"
+    game.mkdir()
+    (game / "Game.exe").write_bytes(ORIGINAL)
+    patch = replace(_patch(), added=(PatchAdded("font.ttf", b"font"),))
+    executable = tmp_path / "測試-ja2zh-tw-patcher.exe"
+    executable.write_bytes(patch_executable(b"MZ stub", patch))
+    apply(game, patch)
+    (game / RECORD).write_text('{"added": null}', encoding="utf-8")
+
+    assert main([str(executable), "--restore", str(game)]) == 0
+    #: The record is gone after this, so the warning is the only trace of what may be left.
+    assert RECORD in capsys.readouterr().out
+    assert (game / "Game.exe").read_bytes() == ORIGINAL

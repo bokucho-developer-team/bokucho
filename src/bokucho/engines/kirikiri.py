@@ -6,9 +6,13 @@ copy of each ``.ks`` that counts is the one in the last loaded archive that hold
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
+import shutil
 from collections.abc import Sequence
 from dataclasses import dataclass
+from fnmatch import fnmatchcase
 from pathlib import Path, PurePosixPath
 from typing import NamedTuple
 
@@ -16,12 +20,15 @@ from bokucho.application.contracts import (
     CancellationToken,
     NeverCancelled,
     NullProgressSink,
+    ProgressEvent,
+    ProgressLevel,
     ProgressSink,
 )
 from bokucho.application.errors import InvalidProject
 from bokucho.engines import kag, xp3
-from bokucho.engines.base import EngineAdapter
+from bokucho.engines.base import EngineAdapter, unpacked_from, unpacked_stamp
 from bokucho.model import Context, TextUnit
+from bokucho.patcher.core import added_files
 from bokucho.patcher.payload import safe_parts
 
 NAMES_FILE = "speakers"
@@ -42,6 +49,8 @@ _IMAGE_MAGIC = {
     ".bmp": b"BM",
     ".tlg": b"TLG",
 }
+IMAGE_FOLDERS = ("image", "system", "rule")
+_PICTURES = (".png", ".jpg", ".jpeg", ".bmp")
 _NULL_PROGRESS = NullProgressSink()
 _NEVER_CANCELLED = NeverCancelled()
 
@@ -72,6 +81,12 @@ class GameLayout:
 class ScriptSource(NamedTuple):
     archive: str
     entry: xp3.Entry
+
+
+def game_folder(game_path: Path) -> Path:
+    """The game's folder, for a configured path that is the folder or its executable."""
+    path = Path(game_path)
+    return path if path.is_dir() else path.parent
 
 
 def _find(folder: Path, relative: str) -> str | None:
@@ -139,11 +154,23 @@ def game_layout(folder: Path) -> GameLayout:
     if data is None:
         raise InvalidProject(f"{folder}: there is no {DATA}, so this is not a KiriKiri game.")
     names, loop = _startup(folder, data)
+    # An archive Bokucho's own patch added holds translations, not the game's text.
+    try:
+        ours = {name.casefold() for name in added_files(folder)}
+    except ValueError as error:
+        raise InvalidProject(
+            f"{folder}: {error}. Which archive a Bokucho patch added is unknown, so the "
+            "game's own files cannot be told from a translation. Restore the game's "
+            "original files first."
+        ) from None
     archives = [data]
-    for name in names:
-        found = _find(folder, name)
-        if found is not None and found.casefold() not in {a.casefold() for a in archives}:
+
+    def add(found: str | None) -> None:
+        if found is not None and found.casefold() not in ours | {a.casefold() for a in archives}:
             archives.append(found)
+
+    for name in names:
+        add(_find(folder, name))
     slots = ""
     if any(
         PurePosixPath(name.replace("\\", "/")).as_posix().lower() == "patch.xp3" for name in names
@@ -152,8 +179,7 @@ def game_layout(folder: Path) -> GameLayout:
     if slots == "loop":
         number = 2
         while (found := _find(folder, f"patch{number}.xp3")) is not None:
-            if found.casefold() not in {a.casefold() for a in archives}:
-                archives.append(found)
+            add(found)
             number += 1
     return GameLayout(folder, tuple(archives), slots)
 
@@ -242,7 +268,109 @@ class KiriKiriAdapter(EngineAdapter):
 
     @classmethod
     def game_root(cls, game_path: Path) -> Path | None:
-        return game_path if game_path.is_dir() else game_path.parent
+        """``None``: a KiriKiri game keeps its pictures inside its archives."""
+        return None
+
+    @classmethod
+    def packed_archive(cls, game_path: Path) -> Path:
+        """The data archive, whose name the unpacked pictures' folder takes."""
+        folder = game_folder(game_path)
+        return folder / game_layout(folder).archives[0]
+
+    @classmethod
+    def unpack_images(
+        cls,
+        game_path: Path,
+        destination: Path,
+        sink: ProgressSink = _NULL_PROGRESS,
+        token: CancellationToken = _NEVER_CANCELLED,
+        *,
+        image_folders: Sequence[str] | None = None,
+        skip_images: Sequence[str] = (),
+    ) -> None:
+        """Write the pictures of the chosen folders, as the game loads them, to ``destination``.
+
+        The game finds a picture by file name alone, so the copy written is the one in the
+        last loaded archive, even when that copy sits at the archive's root.
+        """
+        folder = game_folder(game_path)
+        archives = game_layout(folder).archives
+        folders = IMAGE_FOLDERS if image_folders is None else tuple(image_folders)
+        globs = tuple(skip_images)
+        loaded = [(a, (s := (folder / a).stat()).st_size, s.st_mtime_ns) for a in archives]
+        stamp = hashlib.sha256(json.dumps([loaded, folders, globs]).encode()).hexdigest()
+        if unpacked_from(destination, stamp):
+            return
+        wanted = {name.casefold() for name in folders}
+        last: dict[str, tuple[str, xp3.Entry]] = {}
+        chosen: set[str] = set()
+        clash: dict[str, str] = {}
+        for archive in archives:
+            here: dict[str, str] = {}
+            for entry in _entries(folder, archive):
+                if PurePosixPath(entry.name).suffix.lower() not in _PICTURES:
+                    continue
+                key = entry.name.rsplit("/", 1)[-1].casefold()
+                if key not in here:
+                    clash.pop(key, None)  # the last archive holding a name decides it
+                elif here[key].rpartition("/")[0].casefold() != (
+                    entry.name.rpartition("/")[0].casefold()
+                ):
+                    clash[key] = f"{archive}: {here[key]} and {entry.name} share one file name"
+                here[key] = entry.name
+                last[key] = (archive, entry)
+                parts = entry.name.split("/")
+                if len(parts) > 1 and parts[0].casefold() in wanted:
+                    chosen.add(key)
+        names = sorted(chosen)
+        staging = destination.with_name(f"{destination.name}.partial")
+        shutil.rmtree(staging, ignore_errors=True)
+        staging.mkdir(parents=True)
+
+        def skipped(index: int, detail: str) -> None:
+            sink.publish(
+                ProgressEvent(
+                    "engine.unpack",
+                    index,
+                    len(names),
+                    "engine.unpack.entry.skipped",
+                    level=ProgressLevel.WARNING,
+                    detail=detail,
+                )
+            )
+
+        for index, key in enumerate(names, start=1):
+            token.raise_if_cancelled()
+            archive, entry = last[key]
+            if key in clash:
+                skipped(index, clash[key])
+                continue
+            if any(fnmatchcase(key, glob.casefold()) for glob in globs):
+                continue
+            try:
+                parts = safe_parts(entry.name)
+            except ValueError:
+                skipped(index, f"{archive}: {entry.name} is not a plain file path")
+                continue
+            data = _read(folder, archive, entry)
+            if not data.startswith(_IMAGE_MAGIC[PurePosixPath(entry.name).suffix.lower()]):
+                raise UnsupportedCategory(3, f"{archive}: {entry.name}")
+            target = staging.joinpath(*parts)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+            sink.publish(
+                ProgressEvent(
+                    "engine.unpack",
+                    index,
+                    len(names),
+                    "engine.unpack.progress",
+                    detail=entry.name,
+                )
+            )
+        if destination.exists():
+            shutil.rmtree(destination)
+        staging.replace(destination)
+        unpacked_stamp(destination).write_text(stamp, encoding="ascii")
 
     def _archives(self, folder: Path) -> tuple[str, ...]:
         if self.archives is None:
@@ -261,7 +389,7 @@ class KiriKiriAdapter(EngineAdapter):
         sink: ProgressSink = _NULL_PROGRESS,
         token: CancellationToken = _NEVER_CANCELLED,
     ) -> list[TextUnit]:
-        folder = self.game_root(game_path)
+        folder = game_folder(game_path)
         archives = self._archives(folder)
         found = scripts(folder, archives)
         if not found:
@@ -309,7 +437,7 @@ class KiriKiriAdapter(EngineAdapter):
         sink: ProgressSink = _NULL_PROGRESS,
         token: CancellationToken = _NEVER_CANCELLED,
     ) -> None:
-        folder = self.game_root(game_path)
+        folder = game_folder(game_path)
         found = scripts(folder, self._archives(folder))
         targets = {unit.id: unit.target for unit in units if unit.target.strip()}
         out_path.mkdir(parents=True, exist_ok=True)

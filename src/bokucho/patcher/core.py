@@ -27,6 +27,18 @@ _NO_PERMISSION = (
     "請把整個遊戲資料夾搬到其他地方（例如「文件」）再試一次。"
 )
 RECORD = "bokucho-added.json"
+_DAMAGED_RECORD = (
+    f"還原紀錄「{RECORD}」已損壞，無法確定補丁加入了哪些檔案，所以沒有還原。遊戲檔案沒有被改動。"
+    "請重新安裝遊戲，或把遊戲資料夾換回套用補丁前的備份。"
+)
+_DAMAGED_RECORD_RESTORED = (
+    f"還原紀錄「{RECORD}」已損壞，無法確定補丁加入了哪些檔案。原版遊戲檔案已經還原，"
+    "但補丁加入的檔案（例如字型）可能還留在遊戲資料夾裡。"
+)
+_DAMAGED_RECORD_FOUND = (
+    f"還原紀錄「{RECORD}」已損壞，無法確定補丁加入了哪些檔案，所以不能套用或還原。"
+    "請重新安裝遊戲，或把遊戲資料夾換回套用補丁前的備份。"
+)
 GAME_INI = "Game.ini"
 _IN_USE = "有檔案正在使用中。請關閉遊戲和其他程式，再試一次。"
 FONT_SUFFIXES = (".ttf", ".otf", ".ttc")
@@ -49,6 +61,8 @@ class State(Enum):
     ORIGINAL = "original"
     PATCHED = "patched"
     UNKNOWN = "unknown"
+    #: Bokucho's record of what a patch added cannot be trusted.
+    DAMAGED = "damaged"
 
 
 @dataclass(frozen=True)
@@ -143,6 +157,11 @@ def inspect(folder: Path, patch: Patch) -> FolderState:
     states = set(each.values())
     if states == {State.ORIGINAL} and _add_only(patch):
         assert patch.recipe is not None
+        try:
+            #: The game's own files are untouched, so only the record tells what was added.
+            added_files(folder)
+        except ValueError:
+            return FolderState(State.DAMAGED, False)
         applied = _applied_recipe(folder)
         if applied is not None:
             #: Another version's archive is in place; restoring with this one takes it away.
@@ -166,6 +185,8 @@ def inspect(folder: Path, patch: Patch) -> FolderState:
 def describe(found: FolderState, patch: Patch) -> str:
     """The status line for ``found``."""
     names = _names(patch)
+    if found.state is State.DAMAGED:
+        return _DAMAGED_RECORD_FOUND
     if found.state is State.ORIGINAL:
         return f"找到原版 {names}，可以套用。"
     if found.state is State.PATCHED:
@@ -226,15 +247,44 @@ def _recorded(folder: Path) -> list[dict[str, str]]:
         data = json.loads((folder / RECORD).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return []
-    entries = data.get("added", []) if isinstance(data, dict) else []
+    entries = data.get("added") if isinstance(data, dict) else None
+    if not isinstance(entries, list):
+        return []
     return [
         {"name": entry["name"], "sha256": entry["sha256"]}
         for entry in entries
-        if isinstance(entry, dict)
+        if _well_formed(entry)
+    ]
+
+
+def _well_formed(entry: object) -> bool:
+    """An entry as :func:`_record` writes it, naming a file inside the game folder."""
+    return (
+        isinstance(entry, dict)
         and isinstance(entry.get("name"), str)
         and isinstance(entry.get("sha256"), str)
         and _inside(entry["name"])
-    ]
+    )
+
+
+def added_files(folder: Path) -> list[str]:
+    """The names Bokucho's record lists as added to this game; empty without a record.
+
+    Raises ``ValueError`` for a record that is there but cannot be read, or is not in the
+    shape :func:`_record` writes: what the patch added is then unknown, and reading past it
+    would take a translation for the game's own.
+    """
+    record = folder / RECORD
+    if not record.exists():
+        return []
+    try:
+        data = json.loads(record.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise ValueError(f"{RECORD} cannot be read: {error}") from None
+    entries = data.get("added") if isinstance(data, dict) else None
+    if not isinstance(entries, list) or not all(_well_formed(entry) for entry in entries):
+        raise ValueError(f"{RECORD} is not in the shape Bokucho writes")
+    return [entry["name"] for entry in entries]
 
 
 def _inside(name: str) -> bool:
@@ -522,6 +572,16 @@ def restore(folder: Path, patch: Patch, log: Log | None = None) -> list[str]:
         _report(log, mount_text(patch).removing)
         return restore_mount(folder, patch)
     _report(log, "正在還原原版遊戲檔案。")
+    damaged = False
+    try:
+        added_files(folder)
+    except ValueError as error:
+        #: An add-only patch leaves only what it added: left behind unrecorded, the game
+        #: still loads it and Bokucho reads it as the game's own. Any other patch has the
+        #: originals in its backups, and those go back whatever the record says.
+        if _add_only(patch):
+            raise PatchError(_DAMAGED_RECORD) from error
+        damaged = True
     if not inspect(folder, patch).restorable:
         raise PatchError("找不到可以還原的原版備份（.bak）。遊戲檔案沒有被改動。")
     for item in patch.files:
@@ -548,6 +608,8 @@ def restore(folder: Path, patch: Patch, log: Log | None = None) -> list[str]:
             pass
         left.append(entry["name"])
     (folder / RECORD).unlink(missing_ok=True)
+    if damaged:
+        _report(log, _DAMAGED_RECORD_RESTORED)
     return left
 
 

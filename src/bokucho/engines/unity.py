@@ -18,7 +18,7 @@ import re
 import shutil
 import struct
 import unicodedata
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -611,12 +611,18 @@ class UnityAdapter(EngineAdapter):
         destination: Path,
         sink: ProgressSink = _NULL_PROGRESS,
         token: CancellationToken = _NEVER_CANCELLED,
+        *,
+        image_folders: Sequence[str] | None = None,
+        skip_images: Sequence[str] = (),
     ) -> None:
         """Write every named texture of the game to ``destination`` as ``texture_file``.
 
         Textures that share a name but not a picture are left out: XUnity finds a
         texture by its name, so it could not tell which of them a translation replaces.
+        A Unity game has no picture folders, so ``image_folders`` and ``skip_images``
+        are ignored.
         """
+        del image_folders, skip_images
         layout = UnityLayout(Path(game_path))
         fingerprint = data_fingerprint(layout.data)
         if unpacked_from(destination, fingerprint):

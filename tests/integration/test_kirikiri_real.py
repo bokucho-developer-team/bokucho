@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fnmatch
 import os
 from pathlib import Path
 
@@ -22,6 +23,7 @@ GAME = (
 )
 SKIP = [s for s in os.environ.get("BOKUCHO_TEST_KIRIKIRI_SKIP", "").split(",") if s]
 NAMES = [s for s in os.environ.get("BOKUCHO_TEST_KIRIKIRI_NAMES", "").split(",") if s]
+SKIP_IMAGES = [s for s in os.environ.get("BOKUCHO_TEST_KIRIKIRI_SKIP_IMAGES", "").split(",") if s]
 RULES = KagRules.from_config(SKIP, NAMES)
 
 pytestmark = pytest.mark.skipif(
@@ -99,3 +101,38 @@ def test_the_recipe_compiles_into_scratch_only(tmp_path, new_project):
     assert set(entries) == {script}
     text = decode_script(xp3.read(built, entries[script]))
     assert any(p.source == marked.target for p in pieces(text, script, RULES))
+
+
+def test_pictures_unpack_from_the_chosen_folders_only(tmp_path):
+    KiriKiriAdapter.unpack_images(GAME, tmp_path / "pictures", skip_images=SKIP_IMAGES)
+    names = [
+        p.relative_to(tmp_path / "pictures").as_posix()
+        for p in (tmp_path / "pictures").rglob("*")
+        if p.is_file()
+    ]
+    # The game finds a picture by file name alone, so the copy unpacked may be a later
+    # archive's, outside the chosen folders; its name is still one a chosen folder holds.
+    chosen = {
+        entry.name.rsplit("/", 1)[-1].casefold()
+        for archive in game_layout(GAME).archives
+        for entry in xp3.entries(GAME / archive)
+        if "/" in entry.name and entry.name.split("/")[0].casefold() in {"image", "system", "rule"}
+    }
+    assert {n.rsplit("/", 1)[-1].casefold() for n in names} <= chosen
+    # Nothing unpacked is right only when no PNG, JPG or BMP is left after the skip globs,
+    # as in a game keeping its pictures as TLG.
+    eligible = [
+        n
+        for n in chosen
+        if n.endswith((".png", ".jpg", ".jpeg", ".bmp"))
+        and not any(fnmatch.fnmatchcase(n, g.casefold()) for g in SKIP_IMAGES)
+    ]
+    assert names or not eligible
+    assert not [
+        n
+        for n in names
+        if any(
+            fnmatch.fnmatchcase(n.rsplit("/", 1)[-1].casefold(), g.casefold()) for g in SKIP_IMAGES
+        )
+    ]
+    print(f"unpacked {len(names)} pictures")

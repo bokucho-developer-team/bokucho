@@ -25,7 +25,7 @@ It supports **KiriKiri / KAG**, **LiveMaker / LiveNovel**, **Ren'Py**, **RPG Mak
 
 | Engine | Extraction and injection | Patch carries translated images |
 |---|---|---|
-| KiriKiri / KAG (KiriKiri 2 / Z) | `.ks` scenarios and speaker names in unencrypted `.xp3` archives | No |
+| KiriKiri / KAG (KiriKiri 2 / Z) | `.ks` scenarios, speaker names and pictures in chosen folders of unencrypted `.xp3` archives | Yes |
 | LiveMaker / LiveNovel | Packed or unpacked games, scripts, choices, and text shown through variables | Yes |
 | RPG Maker MV / MZ | JSON data, event text, choices, and plugin note tags | Yes |
 | RPG Maker XP / VX / VX Ace | `.rxdata`, `.rvdata`, and `.rvdata2` data, and `.rgssad`, `.rgss2a`, and `.rgss3a` archives | Yes |

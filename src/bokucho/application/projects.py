@@ -244,7 +244,7 @@ def resolve_game_root(project: Project) -> Path:
         f"{archive.name} is a packed archive that has not been unpacked yet. "
         "Extract the text first — extraction unpacks the game into the project "
         "(the Extract button on the Strings screen, or `bokucho extract`). "
-        "A Unity game's pictures unpack when its images are extracted "
+        "A Unity or KiriKiri game's pictures unpack when its images are extracted "
         "(Extract images on the Images screen, or `bokucho images extract`)."
     )
 
@@ -259,7 +259,15 @@ def unpack_game_images(
     adapter = adapter_class(project.config.engine.type)
     if adapter.game_root(path) is None:
         archive = adapter.packed_archive(path)
-        adapter.unpack_images(path, unpacked_game_dir(project.root, archive), sink, token)
+        engine = project.config.engine
+        adapter.unpack_images(
+            path,
+            unpacked_game_dir(project.root, archive),
+            sink,
+            token,
+            image_folders=engine.kag_image_folders,
+            skip_images=engine.kag_skip_images or (),
+        )
 
 
 def string_filename(source_file: str) -> str:

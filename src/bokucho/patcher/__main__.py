@@ -33,7 +33,9 @@ def main(argv: list[str] | None = None) -> int:
     if headless:
         try:
             if arguments[0] == "--restore":
-                print(restored_message(restore(Path(arguments[1]), patch)))
+                #: The steps go to the console as they go to the window's log, and with them
+                #: the warning a damaged record leaves: the record is gone once restore ends.
+                print(restored_message(restore(Path(arguments[1]), patch, print)))
             else:
                 apply(Path(arguments[1]), patch)
         except PatchError as error:

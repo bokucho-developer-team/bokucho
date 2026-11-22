@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 
 import pytest
@@ -13,10 +14,12 @@ from bokucho.engines.kirikiri import (
     KiriKiriAdapter,
     SlotRefused,
     UnsupportedCategory,
+    game_folder,
     game_layout,
     patch_slot,
 )
 from bokucho.infrastructure.factories import make_engine_adapter
+from bokucho.patcher import core
 
 
 def test_extract_reads_lines_and_names(tmp_path, kirikiri_game):
@@ -228,8 +231,9 @@ def test_the_given_archives_replace_the_layout(tmp_path, kirikiri_game):
 def test_an_executable_path_means_its_folder(tmp_path, kirikiri_game):
     game = kirikiri_game(tmp_path / "g", {"a.ks": "あ\n"})
     (game / "game.exe").write_bytes(b"MZ")
-    assert KiriKiriAdapter.game_root(game / "game.exe") == game
-    assert KiriKiriAdapter.game_root(game) == game
+    assert game_folder(game / "game.exe") == game
+    assert game_folder(game) == game
+    assert KiriKiriAdapter.game_root(game) is None
 
 
 def test_the_config_reaches_the_adapter(tmp_path, new_project, kirikiri_game):
@@ -240,3 +244,61 @@ def test_the_config_reaches_the_adapter(tmp_path, new_project, kirikiri_game):
     project.config.engine.kag_skip_labels = ["*_en"]
     units = make_engine_adapter(project).extract(game)
     assert [(u.id, u.source) for u in units] == [("a.ks::0", "B"), ("name:春香", "春香")]
+
+
+def _record(game, *names):
+    (game / core.RECORD).write_text(
+        json.dumps({"added": [{"name": n, "sha256": "0" * 64} for n in names]}),
+        encoding="utf-8",
+    )
+
+
+def test_an_archive_bokucho_added_is_not_part_of_the_game(tmp_path, kirikiri_game):
+    game = kirikiri_game(
+        tmp_path / "g",
+        {"scenario/first.ks": "おはよう\n"},
+        extra={"patch.xp3": {"first.ks": encode_script("早安\n")}},
+    )
+    _record(game, "PATCH.xp3")
+    assert game_layout(game).archives == ("data.xp3",)
+    assert [u.source for u in KiriKiriAdapter().extract(game)] == ["おはよう"]
+
+
+def test_a_publisher_archive_still_counts_beside_a_bokucho_record(tmp_path, kirikiri_game):
+    game = kirikiri_game(
+        tmp_path / "g", {"a.ks": "あ\n"}, extra={"patch.xp3": {"a.ks": encode_script("い\n")}}
+    )
+    _record(game, "patch2.xp3")
+    assert game_layout(game).archives == ("data.xp3", "patch.xp3")
+
+
+def test_a_damaged_record_is_refused_rather_than_read_past(tmp_path, kirikiri_game):
+    game = kirikiri_game(
+        tmp_path / "g", {"a.ks": "あ\n"}, extra={"patch.xp3": {"a.ks": encode_script("い\n")}}
+    )
+    (game / core.RECORD).write_text('{"added": [{"name": "patch.xp3", "sha', encoding="utf-8")
+    with pytest.raises(InvalidProject, match=core.RECORD):
+        game_layout(game)
+    with pytest.raises(InvalidProject, match=core.RECORD):
+        KiriKiriAdapter().extract(game)
+
+
+@pytest.mark.parametrize(
+    "record",
+    ['{"added": null}', '{"added": [{"name": "patch.xp3"}]}', '{"added": ["patch.xp3"]}', "[]"],
+)
+def test_a_record_in_a_shape_bokucho_never_writes_is_refused(tmp_path, kirikiri_game, record):
+    game = kirikiri_game(
+        tmp_path / "g", {"a.ks": "あ\n"}, extra={"patch.xp3": {"a.ks": encode_script("い\n")}}
+    )
+    (game / core.RECORD).write_text(record, encoding="utf-8")
+    with pytest.raises(InvalidProject, match=core.RECORD):
+        game_layout(game)
+
+
+def test_a_record_listing_nothing_still_reads(tmp_path, kirikiri_game):
+    game = kirikiri_game(
+        tmp_path / "g", {"a.ks": "あ\n"}, extra={"patch.xp3": {"a.ks": encode_script("い\n")}}
+    )
+    (game / core.RECORD).write_text('{"added": []}', encoding="utf-8")
+    assert game_layout(game).archives == ("data.xp3", "patch.xp3")
