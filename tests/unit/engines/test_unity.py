@@ -642,8 +642,11 @@ def test_translation_file_also_matches_a_label_the_game_upper_cases():
     assert not any(line.startswith("GO ") for line in lines)
 
 
-def vector_object(data: bytes):
-    """A stand-in UnityPy object whose type tree is a vector of one-int entries."""
+def vector_object(data: bytes, *, after: bytes = b""):
+    """A stand-in UnityPy object whose type tree is a vector of one-int entries.
+
+    ``after`` is what follows the object in its file; the reader spans both.
+    """
     streams = pytest.importorskip("UnityPy.streams")
     node_class = pytest.importorskip("UnityPy.helpers.TypeTreeNode").TypeTreeNode
     node = node_class.from_list(
@@ -659,7 +662,7 @@ def vector_object(data: bytes):
             ]
         ]
     )
-    reader = streams.EndianBinaryReader(data, endian="<")
+    reader = streams.EndianBinaryReader(data + after, endian="<")
 
     def reset():
         reader.Position = 0
@@ -682,6 +685,19 @@ def test_a_corrupt_array_length_fails_without_allocating_it():
     tracemalloc.start()
     try:
         with pytest.raises((struct.error, EOFError)):
+            parsed_tree(obj)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert peak < 1_000_000
+
+
+def test_a_corrupt_array_length_does_not_read_into_the_objects_that_follow():
+    following = b"\0" * 8_000_000
+    obj = vector_object(struct.pack("<ii", 1_000_000, 7), after=following)
+    tracemalloc.start()
+    try:
+        with pytest.raises((struct.error, EOFError, ValueError)):
             parsed_tree(obj)
         _, peak = tracemalloc.get_traced_memory()
     finally:

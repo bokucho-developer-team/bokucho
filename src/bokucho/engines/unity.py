@@ -327,18 +327,20 @@ def parsed_tree(obj: Any) -> dict[str, Any]:
 
     A type tree generated from the game's code can disagree with the stored bytes.
     UnityPy's C reader allocates an array at whatever length it reads before checking
-    that the bytes exist, while its Python reader fails at the end of the data. A tree
-    that does not consume exactly the object's bytes does not describe it.
+    that the bytes exist, while its Python reader fails at the end of the data. The
+    data is the object's bytes alone, as UnityPy's C path frames an object, so a wrong
+    array length fails at the object's end instead of reading on into the objects after
+    it. A tree that does not consume exactly the object's bytes does not describe it.
     """
     from UnityPy.helpers.TypeTreeHelper import read_typetree
+    from UnityPy.streams import EndianBinaryReader
 
     node = obj._get_typetree_node()
     obj.reset()
-    start = obj.reader.Position
-    tree = read_typetree(
-        node, obj.reader, as_dict=True, check_read=False, assetsfile=obj.assets_file
-    )
-    read = obj.reader.Position - start
+    data = obj.reader.read_bytes(obj.byte_size)
+    reader = EndianBinaryReader(data, endian=obj.reader.endian)
+    tree = read_typetree(node, reader, as_dict=True, check_read=False, assetsfile=obj.assets_file)
+    read = reader.Position
     if read != obj.byte_size:
         raise ValueError(f"type tree read {read} bytes of an object of {obj.byte_size} bytes")
     return tree
