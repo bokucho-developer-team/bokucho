@@ -9,6 +9,7 @@ import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 from zipfile import BadZipFile, ZipFile
 
 from bokucho.patcher.core import (
@@ -134,11 +135,20 @@ def _metadata(data: bytes) -> dict:
         return metadata
 
 
+def _load(path: Path) -> Any:
+    """``path`` parsed. Nested past what the parser follows, it raises ``ValueError`` like any
+    other text that is not JSON: a restore record that reads so is damaged."""
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except RecursionError:
+        raise ValueError(f"{path.name} is nested past what the parser follows") from None
+
+
 def _record(folder: Path) -> dict | None:
     path = _target(folder, BACKUP + "/state.json")
     if not path.is_file():
         return None
-    record = json.loads(path.read_text(encoding="utf-8"))
+    record = _load(path)
     if record["registry"] not in {"js/plugins.js", "www/js/plugins.js"}:
         raise ValueError("Invalid restore registry")
     if (

@@ -22,7 +22,7 @@ from bokucho.patcher.core import (
     _refusal,
     sha256_of,
 )
-from bokucho.patcher.mount import BACKUP, UNITY, _hash, _target
+from bokucho.patcher.mount import BACKUP, UNITY, _hash, _load, _target
 from bokucho.patcher.payload import Patch, safe_parts
 from bokucho.patcher.unity_loader import fetch_loader
 
@@ -83,7 +83,7 @@ def _record(folder: Path) -> dict | None:
     path = _target(folder, BACKUP + "/state.json")
     if not path.is_file():
         return None
-    record = json.loads(path.read_text(encoding="utf-8"))
+    record = _load(path)
     if (
         record["kind"] != UNITY
         or not _hash(record["payload"])

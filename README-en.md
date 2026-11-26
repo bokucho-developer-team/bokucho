@@ -25,7 +25,7 @@ It supports **KiriKiri / KAG**, **LiveMaker / LiveNovel**, **Ren'Py**, **RPG Mak
 
 | Engine | Extraction and injection | Patch carries translated images |
 |---|---|---|
-| KiriKiri / KAG (KiriKiri 2 / Z) | `.ks` scenarios, speaker names and pictures in chosen folders of unencrypted `.xp3` archives | Yes |
+| KiriKiri / KAG (KiriKiri 2 / Z) | `.ks` and `.scn` scenarios, speaker names and pictures in chosen folders of unencrypted `.xp3` archives | Yes |
 | LiveMaker / LiveNovel | Packed or unpacked games, scripts, choices, and text shown through variables | Yes |
 | RPG Maker MV / MZ | JSON data, event text, choices, and plugin note tags | Yes |
 | RPG Maker XP / VX / VX Ace | `.rxdata`, `.rvdata`, and `.rvdata2` data, and `.rgssad`, `.rgss2a`, and `.rgss3a` archives | Yes |
@@ -34,7 +34,7 @@ It supports **KiriKiri / KAG**, **LiveMaker / LiveNovel**, **Ren'Py**, **RPG Mak
 
 The patch is named `<project>-<source language>2<target language>-patcher.exe`, for example `MyGame-ja2zh-tw-patcher.exe`. Players put it in the game folder and run it. A Unity patch needs a network connection when it is applied: it downloads the BepInEx and XUnity.AutoTranslator that fit the game's Unity version.
 
-Godot cannot be translated yet, nor KiriKiri games with `.scn` scenarios or encrypted archives.
+Godot cannot be translated yet, nor KiriKiri games with encrypted archives or scrambled scripts (a game with `.scn` is translated, and its scrambled `.ks` are skipped).
 
 ## Quick start
 

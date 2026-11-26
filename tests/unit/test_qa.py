@@ -165,6 +165,11 @@ def test_format_flags_lost_kag_tags():
     assert format_issues("おはよう[r]ございます[l]", "早[r]安[l]", engine="kirikiri") == []
 
 
+def test_kirikiri_backslash_markup_is_kept():
+    assert format_issues(r"うん\nそう", "嗯對", engine="kirikiri")
+    assert format_issues(r"うん\nそう", r"嗯\n對", engine="kirikiri") == []
+
+
 def test_format_tokens_are_noop_for_other_engines():
     assert format_issues("おはよう%name%", "早安%name%") == []
 

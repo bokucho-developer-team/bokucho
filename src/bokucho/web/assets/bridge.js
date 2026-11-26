@@ -286,9 +286,11 @@ const devSpans = (source) =>
 // The backend reads variables with the engine's own markup; %name% and
 // <VAR ...> cover the sample lines here.
 const devCategory = (unit) =>
-  /%[^%\s]+%|<VAR [^<>]+>/.test(unit.source)
-    ? "variables"
-    : ({ value: "values", image: "images" }[unit.kind] ?? "story");
+  unit.kind === "name"
+    ? "names"
+    : /%[^%\s]+%|<VAR [^<>]+>/.test(unit.source)
+      ? "variables"
+      : ({ value: "values", image: "images" }[unit.kind] ?? "story");
 const devUnitMatches = (unit, status, query, scope, category, sourceLang) => {
   if (status && unit.status !== status) return false;
   if (category && devCategory(unit) !== category) return false;

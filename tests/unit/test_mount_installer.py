@@ -15,8 +15,11 @@ from bokucho.application.release import build_patch, release_patcher
 from bokucho.engines.rpgmaker import RpgMakerAdapter
 from bokucho.model import StringFile
 from bokucho.patcher.__main__ import main
-from bokucho.patcher.core import State, inspect
+from bokucho.patcher.core import PatchError, State, inspect
+from bokucho.patcher.cs2_mount import restore_cs2
 from bokucho.patcher.payload import read_patch
+from bokucho.patcher.renpy_mount import restore_renpy
+from bokucho.patcher.unity_mount import restore_unity
 from bokucho.project import Project
 
 
@@ -189,6 +192,52 @@ def test_restore_refuses_damage_without_changing_files(mount_release, tmp_path, 
     before = _snapshot(player)
     assert main([str(executable), "--restore", str(player)]) == 1
     assert _snapshot(player) == before
+
+
+_NESTED = b"[" * 100_000 + b"]" * 100_000
+
+
+def test_a_restore_record_nested_past_what_the_parser_follows_reads_as_damaged(
+    mount_release, tmp_path, capsys
+):
+    executable, player, base = _release(mount_release, tmp_path)
+    assert main([str(executable), "--apply", str(player)]) == 0
+    patch = read_patch(executable.read_bytes())
+    state = player / ".bokucho-backup" / "state.json"
+    said = []
+    for record in (b"{", _NESTED):
+        state.write_bytes(record)
+        before = _snapshot(player)
+        assert inspect(player, patch).state is State.UNKNOWN
+        for action, refusal in (
+            ("--apply", "不是補丁對應的原版，或已套用補丁。"),
+            ("--restore", "還原失敗，請保留 .bokucho-backup 再試一次。"),
+        ):
+            capsys.readouterr()
+            assert main([str(executable), action, str(player)]) == 1
+            heard = capsys.readouterr().err
+            assert refusal in heard
+            said.append((action, heard.split("（")[0]))
+        assert _snapshot(player) == before
+    assert said[:2] == said[2:]
+
+
+@pytest.mark.parametrize(
+    "restore", [restore_unity, restore_cs2, restore_renpy], ids=["unity", "cs2", "renpy"]
+)
+def test_another_kinds_restore_record_nested_past_what_the_parser_follows_reads_as_damaged(
+    tmp_path, restore
+):
+    state = tmp_path / ".bokucho-backup" / "state.json"
+    state.parent.mkdir()
+    said = []
+    for record in (b"{", _NESTED):
+        state.write_bytes(record)
+        with pytest.raises(PatchError) as caught:
+            restore(tmp_path)
+        assert state.read_bytes() == record
+        said.append(str(caught.value).split("（")[0])
+    assert said[0] == said[1]
 
 
 @pytest.mark.skipif(os.name != "nt", reason="uses Windows file sharing")

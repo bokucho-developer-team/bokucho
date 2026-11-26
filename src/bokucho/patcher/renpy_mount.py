@@ -12,7 +12,7 @@ from pathlib import Path
 from zipfile import BadZipFile, ZipFile
 
 from bokucho.patcher.core import SPARE_BYTES, FolderState, PatchError, State, _refusal, sha256_of
-from bokucho.patcher.mount import BACKUP, RENPY, _hash, _target
+from bokucho.patcher.mount import BACKUP, RENPY, _hash, _load, _target
 from bokucho.patcher.payload import Patch, safe_parts
 
 LANGUAGE_SCRIPT = "game/bokucho_language.rpy"
@@ -62,7 +62,7 @@ def _record(folder: Path) -> dict | None:
     path = _target(folder, BACKUP + "/state.json")
     if not path.is_file():
         return None
-    record = json.loads(path.read_text(encoding="utf-8"))
+    record = _load(path)
     if (
         record["kind"] != RENPY
         or not _hash(record["payload"])

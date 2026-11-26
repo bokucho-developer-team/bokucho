@@ -13,6 +13,8 @@ PATCHER = Path(__file__).resolve().parents[2] / "src" / "bokucho" / "patcher"
 def test_the_patcher_imports_only_its_runtime_compiler_and_compression() -> None:
     allowed = set(sys.stdlib_module_names) | {"__future__", "backports", "compression"}
     compiler = {
+        # The cancel token the release's rehearsal passes; projects already brings it along.
+        "bokucho.application.contracts",
         "bokucho.application.fonts",
         "bokucho.application.projects",
         "bokucho.application.proxy_font",

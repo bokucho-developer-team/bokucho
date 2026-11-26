@@ -9,8 +9,10 @@ from zipfile import ZipFile
 
 import pytest
 
+from bokucho.application import release
 from bokucho.application.assets import save_image_units
-from bokucho.application.errors import ReleaseBlocked
+from bokucho.application.contracts import CancellationFlag
+from bokucho.application.errors import JobCancelled, ReleaseBlocked
 from bokucho.application.projects import extract_text
 from bokucho.application.release import release_patcher
 from bokucho.engines import xp3
@@ -19,6 +21,7 @@ from bokucho.infrastructure.factories import make_engine_adapter
 from bokucho.model import StringFile
 from bokucho.patcher import core
 from bokucho.patcher.payload import read_patch
+from bokucho.patcher.recipe import compile_recipe
 from bokucho.project import Project
 
 
@@ -123,6 +126,15 @@ def test_a_game_with_a_bokucho_patch_on_it_is_not_released(kirikiri_project):
         _release(project, stub)
 
 
+def test_a_record_that_is_a_link_pointing_nowhere_still_stops_the_release(
+    kirikiri_project, tmp_path, symlink
+):
+    project, game, stub = kirikiri_project()
+    symlink(game / core.RECORD, tmp_path / "gone.json")
+    with pytest.raises(ReleaseBlocked, match="holds a patch already"):
+        _release(project, stub)
+
+
 def test_a_publisher_patch_archive_is_checked_with_the_game(kirikiri_project):
     project, _game, stub = kirikiri_project(
         extra={"patch.xp3": {"first.ks": encode_script("[name fn=春香]\nおはよう\n")}}
@@ -187,3 +199,84 @@ def test_two_pictures_with_one_name_are_not_released(kirikiri_project):
     _picture(project, "rule/A.png")
     with pytest.raises(ReleaseBlocked, match="image/a.png"):
         _release(project, stub)
+
+
+LOOP = [
+    "useArchiveIfExists", "addAutoPath", "isExistentStorage", "patch.xp3", "patch", ".xp3", ".xp3>",
+]
+
+
+def test_a_scn_game_checks_only_the_archives_holding_what_it_reads(
+    tmp_path, new_project, kirikiri_game, tjs2_script, psb_file, scn_tree
+):
+    game = kirikiri_game(
+        tmp_path / "game", {},
+        files={"system/Initialize.tjs": tjs2_script(LOOP), "x.ks": b"\xfe\xfe\x01x"},
+        extra={"story.xp3": {"a.txt.scn": psb_file(scn_tree((None, ("あ", "A", "啊"))))},
+               "voice.xp3": {"v.ogg": b"OggS"}},
+    )
+    project = _project(tmp_path, new_project, game)
+    _translate(project, {"a.txt.scn:s:0": "早安"})
+    stub = tmp_path / "stub.exe"
+    stub.write_bytes(b"MZ patcher")
+    patch = read_patch(_release(project, stub).executable.read_bytes())
+    assert [f.name for f in patch.files] == ["story.xp3"]
+    with ZipFile(io.BytesIO(patch.recipe)) as recipe:
+        assert not [n for n in recipe.namelist() if n.lower().endswith(".scn")]
+        meta = json.loads(recipe.read("recipe.json"))
+    assert (meta["archives"], meta["slots"]) == (["story.xp3"], "loop")
+
+
+def test_a_scrambled_script_over_a_readable_copy_is_checked_and_left_as_it_is(
+    tmp_path, new_project, kirikiri_game, psb_file, scn_tree
+):
+    # Replaying against data.xp3 alone, the patcher would take its readable a.ks for the
+    # script the game reads, and write the translated name into that older copy.
+    game = kirikiri_game(
+        tmp_path / "game", {"a.ks": "[name fn=春香]\nおはよう\n"},
+        files={"s.txt.scn": psb_file(scn_tree(("春香", ("あ", "A", "啊"))))},
+        extra={"patch.xp3": {"a.ks": b"\xfe\xfe\x01x"}},
+    )
+    project = _project(tmp_path, new_project, game)
+    _translate(project, {"name:春香": "小春"})
+    stub = tmp_path / "stub.exe"
+    stub.write_bytes(b"MZ patcher")
+    patch = read_patch(_release(project, stub).executable.read_bytes())
+    assert [f.name for f in patch.files] == ["data.xp3", "patch.xp3"]
+    _rebuilt, (added,) = compile_recipe(game, patch, tmp_path / "scratch")
+    (tmp_path / "added.xp3").write_bytes(added.data)
+    assert [e.name for e in xp3.entries(tmp_path / "added.xp3")] == ["s.txt.scn"]
+
+
+def test_a_cancel_while_hashing_stops_before_the_next_archive(kirikiri_project, monkeypatch):
+    project, _game, stub = kirikiri_project(
+        extra={"patch.xp3": {"first.ks": encode_script("[name fn=春香]\nおはよう\n")}}
+    )
+    flag = CancellationFlag()
+    hashed = []
+
+    def hash_then_cancel(path):
+        hashed.append(path.name)
+        flag.cancel()
+        return "0" * 64
+
+    monkeypatch.setattr(release, "sha256_of", hash_then_cancel)
+    with pytest.raises(JobCancelled):
+        release_patcher(project, make_engine_adapter, project.root / "dist", stub, token=flag)
+    assert hashed == ["data.xp3"]
+
+
+@pytest.mark.parametrize("record", ["file", "link pointing nowhere"])
+def test_an_rpg_maker_game_with_a_record_beside_it_is_not_released(tmp_path, symlink, record):
+    from pathlib import PurePath
+    from types import SimpleNamespace
+
+    game = tmp_path / "game"
+    game.mkdir()
+    if record == "file":
+        (game / core.RECORD).write_text("{}", encoding="utf-8")
+    else:
+        symlink(game / core.RECORD, tmp_path / "gone.json")
+    layout = SimpleNamespace(root=game, relative_data=PurePath("Data"), variant=None)
+    with pytest.raises(ReleaseBlocked, match="holds a patch already"):
+        release._refuse_a_patched_folder([], layout, [])

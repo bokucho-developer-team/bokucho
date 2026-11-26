@@ -281,6 +281,10 @@
         <translation>Values</translation>
     </message>
     <message>
+        <source>Names</source>
+        <translation>Names</translation>
+    </message>
+    <message>
         <source>Pictures</source>
         <translation>Pictures</translation>
     </message>
@@ -782,6 +786,7 @@
     <message><source>Repacking</source><translation>Repacking</translation></message>
     <message><source>Unpacking</source><translation>Unpacking</translation></message>
     <message><source>Skipped, cannot be unpacked</source><translation>Skipped, cannot be unpacked</translation></message>
+    <message><source>Skipped scrambled scripts; a later version will read them</source><translation>Skipped scrambled scripts; a later version will read them</translation></message>
     <message><source>Another operation is already running: {name}</source><translation>Another operation is already running: {name}</translation></message>
     <message><source>Cancelling...</source><translation>Cancelling...</translation></message>
     <message><source>Progress</source><translation>Progress</translation></message>

@@ -10,12 +10,13 @@ from collections.abc import Callable
 from pathlib import Path, PurePosixPath
 from zipfile import ZipFile
 
+from bokucho.application.contracts import CancellationToken, NeverCancelled
 from bokucho.application.fonts import patch_game_font
 from bokucho.application.projects import inject_translations
 from bokucho.application.proxy_font import UIF_CONFIG, UIF_DLL, patch_system_font, uif_config
 from bokucho.engines import xp3
 from bokucho.engines.base import NoPixelFont
-from bokucho.engines.kirikiri import KiriKiriAdapter, SlotRefused, patch_slot
+from bokucho.engines.kirikiri import KiriKiriAdapter, SlotRefused, game_layout, patch_slot
 from bokucho.engines.livemaker import LiveMakerAdapter
 from bokucho.patcher.core import PatchError
 from bokucho.patcher.payload import Patch, PatchAdded, safe_parts
@@ -28,6 +29,7 @@ RGSS_SUFFIXES: dict[str, str] = {
     "rpgmaker-vx-ace": ".rvdata2",
 }
 FONT_LICENSE = "font-license.txt"
+_NEVER_CANCELLED = NeverCancelled()
 #: What a font fill names, as the injected Ruby loader quotes it.
 _FILL_FILE = re.compile(r"Bokucho-[A-Za-z0-9]+\.ttf")
 _FILL_FAMILY = re.compile(r"Bokucho [A-Za-z0-9 ]+")
@@ -43,8 +45,12 @@ def compile_recipe(
     patch: Patch,
     root: Path,
     log: Callable[[str], None] | None = None,
+    token: CancellationToken = _NEVER_CANCELLED,
 ) -> tuple[dict[str, Path], tuple[PatchAdded, ...]]:
-    """Use the same injection and font workflows as Bokucho, entirely under ``root``."""
+    """Use the same injection and font workflows as Bokucho, entirely under ``root``.
+
+    ``token`` lets the release's rehearsal stop a KiriKiri injection part way.
+    """
     assert patch.recipe is not None
     report = log or (lambda _message: None)
     report("正在解開補丁資料。")
@@ -53,7 +59,7 @@ def compile_recipe(
     if metadata.get("engine") in RGSS_SUFFIXES:
         return _compile_rgss(folder, patch, root, metadata, report)
     if metadata.get("engine") == "kirikiri":
-        return _compile_kirikiri(folder, patch, root, metadata, report)
+        return _compile_kirikiri(folder, patch, root, metadata, report, token)
     return _compile_livemaker(folder, patch, root, metadata, report)
 
 
@@ -126,6 +132,7 @@ def _compile_kirikiri(
     root: Path,
     metadata: dict,
     report: Callable[[str], None],
+    token: CancellationToken,
 ) -> tuple[dict[str, Path], tuple[PatchAdded, ...]]:
     """The player's own scripts, translated, in one new patch archive the game loads last."""
     archives = metadata["archives"]
@@ -153,6 +160,14 @@ def _compile_kirikiri(
         for unit in strings.units:
             if len(safe_parts(str(unit.engine_ref.get("file", "")))) != 1:
                 raise ValueError(f"Invalid KiriKiri script file: {unit.engine_ref.get('file')}")
+    # The release checked only the archives holding scenarios: the one holding the startup
+    # script, or one an update added later, can differ, so the player's own game is read.
+    layout = game_layout(folder)
+    if layout.slots != metadata["slots"]:
+        raise PatchError(
+            "這個遊戲版本載入補丁封包的方式和製作補丁時的版本不同，套用了遊戲也不會讀到翻譯。"
+            "請確認遊戲版本和補丁相符。"
+        )
     try:
         slot = patch_slot(folder, metadata["slots"])
     except SlotRefused as error:
@@ -161,7 +176,7 @@ def _compile_kirikiri(
     report("正在注入翻譯資料。")
     adapter = KiriKiriAdapter(skip, names, archives=archives, skip_labels=labels)
     if any(strings.units for strings in project.load_string_files()):
-        inject_translations(project, adapter, out)
+        inject_translations(project, adapter, out, token=token)
     # The game finds files by name alone, so scripts and pictures all sit at the root.
     found: dict[str, str] = {}
     produced: dict[str, bytes] = {}
@@ -179,6 +194,20 @@ def _compile_kirikiri(
         produced[path.name] = path.read_bytes()
     if not produced:
         raise ValueError("Nothing to patch: no translated line or picture.")
+    # An unchecked archive holding a script written here (an update's patch archive, say)
+    # holds a newer copy, and ours, loaded last, would hide it. Pictures are left out: the
+    # archives they come from are never checked.
+    written = {name.casefold() for name in produced if name.lower().endswith((".ks", ".scn"))}
+    checked = {name.casefold() for name in archives}
+    for archive in layout.archives:
+        if archive.casefold() not in checked:
+            held = {e.name.rsplit("/", 1)[-1].casefold() for e in xp3.entries(folder / archive)}
+            if clash := sorted(written & held):
+                raise PatchError(
+                    f"遊戲資料夾裡的 {archive} 也有這個補丁要改的劇本（{clash[0]}），"
+                    "可能是遊戲更新後加入的。翻譯不是照這個版本做的，套用後會蓋掉它。"
+                    "請確認遊戲版本和補丁相符。"
+                )
     report(f"正在建立補丁封包 {slot}。")
     built = root / "build" / slot
     built.parent.mkdir(parents=True, exist_ok=True)

@@ -258,6 +258,7 @@ class UnitQueue {
       el("option", { value: "story", text: t("StringsScreen", "Story") }),
       el("option", { value: "variables", text: t("StringsScreen", "With variables") }),
       el("option", { value: "values", text: t("StringsScreen", "Values") }),
+      el("option", { value: "names", text: t("StringsScreen", "Names") }),
       el("option", { value: "images", text: t("StringsScreen", "Pictures") }),
     ]);
     this.languageSelect = createLanguageSelect(this.ctx, {

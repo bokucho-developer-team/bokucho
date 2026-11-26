@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import locale
 import os
+import re
 import shutil
 import sys
 from io import BytesIO
@@ -35,9 +36,11 @@ from bokucho.engines.rpgmaker_marshal import dump_marshal, load_legacy, load_mar
 from bokucho.engines.rpgmaker_scripts import load_scripts  # noqa: E402
 from bokucho.exe_icon import exe_icon  # noqa: E402
 from bokucho.model import StringFile  # noqa: E402
+from bokucho.patcher import core  # noqa: E402
 from bokucho.patcher.__main__ import main  # noqa: E402
 from bokucho.patcher.core import (  # noqa: E402
     RECORD,
+    PatchError,
     State,
     applied_message,
     apply,
@@ -305,6 +308,25 @@ def test_the_window_title_is_written_in_the_players_code_page_and_put_back(
     assert ini.read_bytes() == INI.replace(b"WindowSize=0", b"WindowSize=1")
 
 
+def test_a_record_taken_up_holding_what_utf8_cannot_encode_still_gets_the_title(
+    rgss_release, tmp_path: Path, monkeypatch
+) -> None:
+    # Written back as read, the record would stop the title, and the install before it.
+    generation, _, _, player = rgss_release
+    patch = read_patch(_release_with_title(tmp_path).read_bytes())
+    monkeypatch.setattr(locale, "getencoding", lambda: "cp950")
+    entry = {"name": "old.dat", "sha256": "\ud800"}
+    document = {"added": [entry], "recipe": core._digest(patch.recipe)}
+    (player / RECORD).write_text(json.dumps(document), encoding="utf-8")
+
+    apply(player, patch)
+    assert entry in core._recorded(player)
+    titled = INI if generation == "xp" else INI.replace(
+        TITLE.encode("cp932"), "勇者之旅".encode("cp950")
+    )
+    assert (player / "Game.ini").read_bytes() == titled
+
+
 def test_a_title_the_players_code_page_cannot_show_stays_original(
     rgss_release, tmp_path: Path, monkeypatch
 ) -> None:
@@ -317,6 +339,226 @@ def test_a_title_the_players_code_page_cannot_show_stays_original(
     assert inspect(player, patch).state is State.PATCHED
     assert (player / "Game.ini").read_bytes() == INI
     assert any("標題" in line for line in said) is (generation != "xp")
+
+
+def test_a_link_left_at_the_titles_scratch_name_is_kept_and_the_title_stays(
+    rgss_release, tmp_path: Path, monkeypatch, symlink
+) -> None:
+    # Not the patcher's to take away, and written through, it would write elsewhere.
+    generation, _, _, player = rgss_release
+    patch = read_patch(_release_with_title(tmp_path).read_bytes())
+    monkeypatch.setattr(locale, "getencoding", lambda: "cp950")
+    outside = tmp_path / "outside" / "Game.ini"
+    outside.parent.mkdir()
+    stray = player / "Game.ini.bokucho-tmp"
+    symlink(stray, outside)
+    said: list[str] = []
+
+    apply(player, patch, said.append)
+
+    assert inspect(player, patch).state is State.PATCHED
+    assert stray.is_symlink() and not outside.exists()
+    assert (player / "Game.ini").read_bytes() == INI
+    assert any("標題" in line for line in said) is (generation != "xp")
+    restore(player, patch)
+    assert inspect(player, patch).state is State.ORIGINAL
+    assert stray.is_symlink() and not outside.exists()
+
+
+def test_a_link_put_at_the_titles_scratch_name_before_restore_is_kept_and_named(
+    rgss_release, tmp_path: Path, monkeypatch, symlink
+) -> None:
+    generation, _, _, player = rgss_release
+    if generation == "xp":
+        pytest.skip("an XP game keeps its title")
+    patch = read_patch(_release_with_title(tmp_path).read_bytes())
+    monkeypatch.setattr(locale, "getencoding", lambda: "cp950")
+    apply(player, patch)
+    titled = (player / "Game.ini").read_bytes()
+    assert titled != INI
+    outside = tmp_path / "outside" / "Game.ini"
+    outside.parent.mkdir()
+    stray = player / "Game.ini.bokucho-tmp"
+    symlink(stray, outside)
+
+    with pytest.raises(PatchError, match=re.escape(f"「{stray.name}」已經存在")):
+        restore(player, patch)
+
+    assert stray.is_symlink() and not outside.exists()
+    assert (player / "Game.ini").read_bytes() == titled
+    assert inspect(player, patch).state is State.PATCHED
+
+
+def test_a_file_left_at_the_titles_scratch_name_is_kept_and_the_title_stays(
+    rgss_release, tmp_path: Path, monkeypatch
+) -> None:
+    generation, _, _, player = rgss_release
+    patch = read_patch(_release_with_title(tmp_path).read_bytes())
+    monkeypatch.setattr(locale, "getencoding", lambda: "cp950")
+    stray = player / "Game.ini.bokucho-tmp"
+    stray.write_bytes(b"not the patch's")
+    said: list[str] = []
+
+    apply(player, patch, said.append)
+
+    assert inspect(player, patch).state is State.PATCHED
+    assert stray.read_bytes() == b"not the patch's"
+    assert (player / "Game.ini").read_bytes() == INI
+    assert any("標題" in line for line in said) is (generation != "xp")
+    # The title never changed, so there is none to put back: restore is not held up.
+    restore(player, patch)
+    assert inspect(player, patch).state is State.ORIGINAL
+    assert stray.read_bytes() == b"not the patch's"
+
+
+def _unread(monkeypatch, path: Path) -> None:
+    """Fail the test when ``path`` is opened."""
+    real_open = Path.open
+
+    def open_(self: Path, *args, **kwargs):
+        assert self != path, f"{path} was read"
+        return real_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", open_)
+
+
+def test_a_game_ini_that_is_a_link_is_neither_read_nor_written(
+    rgss_release, tmp_path: Path, monkeypatch, symlink
+) -> None:
+    _, _, _, player = rgss_release
+    patch = read_patch(_release_with_title(tmp_path).read_bytes())
+    monkeypatch.setattr(locale, "getencoding", lambda: "cp950")
+    outside = tmp_path / "outside.ini"
+    outside.write_bytes((player / "Game.ini").read_bytes())
+    (player / "Game.ini").unlink()
+    symlink(player / "Game.ini", outside)
+    _unread(monkeypatch, player / "Game.ini")
+
+    apply(player, patch)
+
+    assert inspect(player, patch).state is State.PATCHED
+    assert (player / "Game.ini").is_symlink()
+    assert outside.read_bytes() == INI
+    assert "title" not in json.loads((player / RECORD).read_text(encoding="utf-8"))
+
+
+def test_restore_neither_reads_nor_writes_a_game_ini_since_made_a_link(
+    rgss_release, tmp_path: Path, monkeypatch, symlink
+) -> None:
+    _, _, _, player = rgss_release
+    patch = read_patch(_release_with_title(tmp_path).read_bytes())
+    monkeypatch.setattr(locale, "getencoding", lambda: "cp950")
+    apply(player, patch)
+    outside = tmp_path / "outside.ini"
+    outside.write_bytes(b"[Game]\r\nTitle=elsewhere\r\n")
+    (player / "Game.ini").unlink()
+    symlink(player / "Game.ini", outside)
+    _unread(monkeypatch, player / "Game.ini")
+
+    restore(player, patch)
+
+    assert (player / "Game.ini").is_symlink()
+    assert outside.read_bytes() == b"[Game]\r\nTitle=elsewhere\r\n"
+
+
+def test_a_backup_name_holding_a_link_pointing_nowhere_is_refused_before_compiling(
+    rgss_release, monkeypatch, symlink
+) -> None:
+    _, _, built, player = rgss_release
+    patch = read_patch(built.executable.read_bytes())
+    target = player / patch.files[0].name
+    backup = target.with_name(f"{target.name}.bak")
+    symlink(backup, player / "gone")
+    before = _snapshot(player)
+
+    def compile_recipe(*args, **kwargs):
+        raise AssertionError("compiled before the backup name was checked")
+
+    monkeypatch.setattr("bokucho.patcher.recipe.compile_recipe", compile_recipe)
+    with pytest.raises(PatchError, match=backup.name):
+        apply(player, patch)
+
+    assert backup.is_symlink()
+    assert _snapshot(player) == before
+
+
+@pytest.mark.parametrize("record", ["another patch's", "damaged", "this recipe's, misshapen"])
+def test_a_record_apply_would_refuse_is_said_before_compiling(
+    rgss_release, monkeypatch, record: str
+) -> None:
+    # Said by the status line too, the window never offers an apply that is refused. The
+    # recipe's digest does not vouch for a list Bokucho did not write: its entries are lost.
+    _, _, built, player = rgss_release
+    patch = read_patch(built.executable.read_bytes())
+    if record == "damaged":
+        (player / RECORD).write_text("{", encoding="utf-8")
+        said = core._DAMAGED_RECORD_FOUND
+    elif record == "this recipe's, misshapen":
+        assert patch.recipe is not None
+        document = {"added": [{"name": "Fonts/fill.ttf"}], "recipe": core._digest(patch.recipe)}
+        (player / RECORD).write_text(json.dumps(document), encoding="utf-8")
+        said = core._DAMAGED_RECORD_FOUND
+    else:
+        (player / "version.dll").write_bytes(b"MZ")
+        listed = [{"name": "version.dll", "sha256": sha256_of(player / "version.dll")}]
+        (player / RECORD).write_text(json.dumps({"added": listed}), encoding="utf-8")
+        said = core._OTHER_RECORD
+    before = _snapshot(player)
+
+    def compile_recipe(*args, **kwargs):
+        raise AssertionError("compiled before the record was checked")
+
+    monkeypatch.setattr("bokucho.patcher.recipe.compile_recipe", compile_recipe)
+    found = inspect(player, patch)
+    assert found.state is not State.ORIGINAL and not found.restorable
+    assert core.describe(found, patch) == said
+    with pytest.raises(PatchError, match=re.escape(said)):
+        apply(player, patch)
+
+    assert _snapshot(player) == before
+
+
+def test_a_title_scratch_file_that_cannot_be_checked_leaves_the_title_and_the_install(
+    rgss_release, tmp_path: Path, monkeypatch
+) -> None:
+    # The title is the last, optional step: the translation is in place by then.
+    generation, _, _, player = rgss_release
+    patch = read_patch(_release_with_title(tmp_path).read_bytes())
+    monkeypatch.setattr(locale, "getencoding", lambda: "cp950")
+    is_own = core._is_own
+    monkeypatch.setattr(
+        core, "_is_own", lambda path, own: path.name != "Game.ini.bokucho-tmp" and is_own(path, own)
+    )
+    said: list[str] = []
+
+    apply(player, patch, said.append)
+
+    monkeypatch.undo()
+    assert inspect(player, patch).state is State.PATCHED
+    assert (player / "Game.ini").read_bytes() == INI
+    assert any("標題" in line for line in said) is (generation != "xp")
+    restore(player, patch)
+    assert inspect(player, patch).state is State.ORIGINAL
+
+
+def test_restore_names_a_file_left_at_the_titles_scratch_name(
+    rgss_release, tmp_path: Path, monkeypatch
+) -> None:
+    generation, _, _, player = rgss_release
+    patch = read_patch(_release_with_title(tmp_path).read_bytes())
+    monkeypatch.setattr(locale, "getencoding", lambda: "cp950")
+    apply(player, patch)
+    stray = player / "Game.ini.bokucho-tmp"
+    stray.write_bytes(b"not the patch's")
+    before = _snapshot(player)
+
+    if generation == "xp":  # XP's window keeps its title, so there is none to put back.
+        restore(player, patch)
+    else:
+        with pytest.raises(PatchError, match=r"Game\.ini\.bokucho-tmp"):
+            restore(player, patch)
+        assert _snapshot(player) == before
+    assert stray.read_bytes() == b"not the patch's"
 
 
 #: What the game's own font draws in the font tests: the title and two reference kanji.

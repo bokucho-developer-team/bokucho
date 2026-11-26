@@ -98,6 +98,11 @@ def test_ids_hold_when_a_line_is_added_under_another_label():
     assert ids(before)["B"] == ids(after)["B"] == "a.ks:b:0"
 
 
+def test_a_lone_surrogate_no_encoding_writes_is_refused():
+    with pytest.raises(UnsafeTarget, match="a.ks::0"):
+        rewrite("おはよう[l]\n", "a.ks", KagRules(), {"a.ks::0": "早\ud800安"})
+
+
 @pytest.mark.parametrize("target", ["早[安", "早安[font size=9]"])
 def test_a_bracket_that_opens_no_source_tag_is_refused(target):
     with pytest.raises(UnsafeTarget, match="a.ks::0"):

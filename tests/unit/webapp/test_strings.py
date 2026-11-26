@@ -326,6 +326,14 @@ def test_the_queue_shelves_story_apart_from_lines_with_variables(
                 ],
             ),
             StringFile(
+                source_file="speaker-names",
+                units=[
+                    TextUnit(id="name:春香", source="春香", kind="name"),
+                    # A name stays under Names even with a variable in it.
+                    TextUnit(id="name:%who%", source="%who%さん", kind="name"),
+                ],
+            ),
+            StringFile(
                 source_file="images",
                 units=[TextUnit(id="img:a.png", source="道具", kind="image")],
             ),
@@ -339,8 +347,9 @@ def test_the_queue_shelves_story_apart_from_lines_with_variables(
     assert shelf("story") == ["story"]
     assert shelf("variables") == ["named", "price"]
     assert shelf("values") == ["item"]
+    assert shelf("names") == ["name:春香", "name:%who%"]
     assert shelf("images") == ["img:a.png"]
-    assert len(api.unit_rows()["rows"]) == 5
+    assert len(api.unit_rows()["rows"]) == 7
     assert api.next_unit("a.lsb", "named", category="variables")["id"] == "price"
     assert api.next_unit("a.lsb", "story", category="values")["id"] == "item"
 

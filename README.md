@@ -25,7 +25,7 @@ Bokucho 是開源的遊戲翻譯工作台。它把遊戲裡的文字和圖片整
 
 | 引擎 | 擷取與回寫 | 補丁帶翻譯圖片 |
 |---|---|---|
-| KiriKiri / KAG（KiriKiri 2 / Z） | 未加密 `.xp3` 封包裡的 `.ks` 劇本與人名，以及選定資料夾裡的圖片 | 是 |
+| KiriKiri / KAG（KiriKiri 2 / Z） | 未加密 `.xp3` 封包裡的 `.ks` 與 `.scn` 劇本與人名，以及選定資料夾裡的圖片 | 是 |
 | LiveMaker / LiveNovel | 打包或解包的遊戲、劇本、選項、變數顯示文字 | 是 |
 | RPG Maker MV / MZ | JSON 資料、事件文字、選項、plugin note tags | 是 | 
 | RPG Maker XP / VX / VX Ace | `.rxdata`、`.rvdata`、`.rvdata2` 資料，以及 `.rgssad`、`.rgss2a`、`.rgss3a` 封包 | 是 |
@@ -34,7 +34,7 @@ Bokucho 是開源的遊戲翻譯工作台。它把遊戲裡的文字和圖片整
 
 補丁檔名為 `<專案>-<來源語言>2<目標語言>-patcher.exe`，例如 `MyGame-ja2zh-tw-patcher.exe`。玩家把它放進遊戲資料夾執行即可。Unity 補丁套用時要連網，依遊戲的 Unity 版本下載 BepInEx 與 XUnity.AutoTranslator。
 
-Godot 尚不支援翻譯；KiriKiri 遊戲的 `.scn` 劇本、加密封包也還不支援。
+Godot 尚不支援翻譯；KiriKiri 遊戲的加密封包、打亂的劇本也還不支援（有 `.scn` 的遊戲照樣翻譯，略過打亂的 `.ks`）。
 
 ## 快速開始
 
