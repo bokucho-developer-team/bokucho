@@ -260,7 +260,7 @@ def _own_record(folder: Path, patch: Patch) -> bool:
         record = read_record(folder)
         # Every entry as Bokucho writes it, whatever names the patch: one it did not write
         # would be dropped from the record apply writes, and its file left by restore.
-        added_files(folder)
+        entries = _shaped(record)
     except (OSError, ValueError):
         return False
     if "restoring" in record:
@@ -274,7 +274,7 @@ def _own_record(folder: Path, patch: Patch) -> bool:
     # Written before records named their patch: told by content alone. Another patch's
     # file by one of these names is not this patch's, nor is a record listing none of them.
     added = {(item.name, _digest(item.data)) for item in patch.added}
-    listed = {(entry["name"], entry["sha256"]) for entry in _recorded(folder)}
+    listed = {(entry["name"], entry["sha256"]) for entry in entries}
     return bool(listed) and listed <= added
 
 
@@ -460,10 +460,15 @@ def added_files(folder: Path) -> list[str]:
         return []
     except (OSError, ValueError) as error:  # a link pointing nowhere among them
         raise ValueError(f"{RECORD} cannot be read: {error}") from None
+    return [entry["name"] for entry in _shaped(data)]
+
+
+def _shaped(data: Any) -> list[dict[str, str]]:
+    """What a parsed record lists as added; ``ValueError`` unless :func:`_record` wrote it so."""
     entries = data.get("added") if isinstance(data, dict) else None
     if not isinstance(entries, list) or not all(_well_formed(entry) for entry in entries):
         raise ValueError(f"{RECORD} is not in the shape Bokucho writes")
-    return [entry["name"] for entry in entries]
+    return _entries(data)
 
 
 def _inside(name: str) -> bool:
@@ -1015,7 +1020,7 @@ def _commit_install(
     # What the record lists already comes from this one read: read again in vain, it would
     # list nothing, and what a stopped install put in would be left out of the record.
     try:
-        listed = [] if before is None else _entries(json.loads(before))
+        listed = [] if before is None else _shaped(json.loads(before))
     except (ValueError, RecursionError):  # damaged since the checks
         raise PatchError(_DAMAGED_RECORD_FOUND) from None
     # Only a file not there yet is this patch's to add, and to take away again: one there

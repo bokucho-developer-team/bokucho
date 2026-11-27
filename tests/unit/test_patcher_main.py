@@ -1808,8 +1808,9 @@ def test_what_a_stopped_installs_record_lists_is_taken_from_one_read(
     assert sorted(path.name for path in game.iterdir()) == ["Game.exe"]
 
 
+@pytest.mark.parametrize("text", ['{"added": [', '{"added": null}'], ids=["not-json", "not-a-list"])
 def test_a_record_damaged_after_the_checks_stops_the_install_unwritten(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch, text: str
 ) -> None:
     # Read as listing nothing, the record put out would leave out what the stopped install
     # put in.
@@ -1819,7 +1820,7 @@ def test_a_record_damaged_after_the_checks_stops_the_install_unwritten(
 
     def stage_then_damage(folder: Path, *args) -> None:
         stage(folder, *args)
-        (folder / RECORD).write_text('{"added": [', encoding="utf-8")
+        (folder / RECORD).write_text(text, encoding="utf-8")
 
     monkeypatch.setattr(core, "_stage", stage_then_damage)
     with pytest.raises(PatchError, match=re.escape(core._DAMAGED_RECORD_FOUND)):
@@ -1828,6 +1829,17 @@ def test_a_record_damaged_after_the_checks_stops_the_install_unwritten(
 
     assert sorted(path.name for path in game.iterdir()) == ["Game.exe", RECORD, "font.ttf"]
     assert (game / "Game.exe").read_bytes() == ORIGINAL
+
+
+def test_a_record_replaced_between_reads_is_judged_by_the_first(
+    tmp_path: Path, monkeypatch
+) -> None:
+    game = tmp_path / "game"
+    game.mkdir()
+    reads = iter([None, {"added": []}])
+    monkeypatch.setattr(core, "read_record", lambda folder: next(reads))
+
+    assert core._own_record(game, _font_patch()) is False
 
 
 def test_a_record_field_utf8_cannot_hold_stops_no_restore(tmp_path: Path) -> None:
