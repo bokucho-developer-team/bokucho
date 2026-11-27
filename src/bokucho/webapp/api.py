@@ -197,7 +197,10 @@ def _has_words(unit: TextUnit) -> bool:
 
 
 def _category(unit: TextUnit, engine: str) -> str:
-    """The queue shelf ``unit`` sits on: a line with a variable in it, else its kind."""
+    """The queue shelf ``unit`` sits on: a name, else a line with a variable in it, else its
+    kind. A name with markup in it (ruby, say) is still listed under Names."""
+    if unit.kind == "name":
+        return "names"
     if any(token["kind"] == "variable" for token in translation_tokens(unit.source, engine)):
         return "variables"
     return {"value": "values", "image": "images"}.get(unit.kind, "story")

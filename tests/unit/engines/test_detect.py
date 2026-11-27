@@ -94,6 +94,7 @@ def test_kirikiri_is_supported(tmp_path):
     top = detect(tmp_path)[0]
     assert (top.engine, top.supported) == ("kirikiri", True)
     assert "kag_skip_branches" in top.hint
+    assert ".scn" in top.hint
 
 
 def test_every_signature_has_hint_and_patterns():

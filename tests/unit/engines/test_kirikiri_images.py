@@ -9,6 +9,7 @@ import pytest
 
 from bokucho.application.contracts import CancellationFlag, ProgressLevel
 from bokucho.application.errors import JobCancelled
+from bokucho.engines import xp3
 from bokucho.engines.base import unpacked_stamp
 from bokucho.engines.kirikiri import KiriKiriAdapter, UnsupportedCategory
 from bokucho.patcher import core
@@ -111,6 +112,39 @@ def test_a_later_archive_with_one_copy_settles_an_earlier_clash(tmp_path, kiriki
     events = _unpack(game, tmp_path / "out")
     assert _tree(tmp_path / "out")["a.png"] == PNG + b"2"
     assert not [e for e in events if e.level is ProgressLevel.WARNING]
+
+
+def test_one_name_in_two_archives_loaded_in_an_unknown_order_is_left_out(
+    tmp_path, kirikiri_game, tjs2_script
+):
+    # A compiled startup mounts the archives beside data.xp3 in an order Bokucho cannot read.
+    extra = {
+        "alpha.xp3": {"image/a.png": PNG + b"1", "image/bg.png": PNG + b"a"},
+        "beta.xp3": {"image/a.png": PNG + b"2"},
+    }
+    loop = ["addAutoPath", "isExistentStorage", "patch.xp3", "patch", ".xp3"]
+    startup = {"system/Initialize.tjs": tjs2_script(loop)}
+    game = kirikiri_game(tmp_path / "g", {"a.ks": "あ\n"}, files=startup, extra=extra)
+    events = _unpack(game, tmp_path / "out")
+    # data.xp3 holds the startup, so it loads first, and alpha.xp3's copy of bg.png wins.
+    assert _tree(tmp_path / "out") == {"image/bg.png": PNG + b"a"}
+    (warning,) = [e for e in events if e.level is ProgressLevel.WARNING]
+    assert "alpha.xp3" in warning.detail and "beta.xp3" in warning.detail
+    # A patch archive loads after them all, so its copy settles it.
+    xp3.write(game / "patch.xp3", {"a.png": PNG + b"3"})
+    events = _unpack(game, tmp_path / "again")
+    assert _tree(tmp_path / "again")["a.png"] == PNG + b"3"
+    assert not [e for e in events if e.level is ProgressLevel.WARNING]
+
+
+def test_the_pictures_folder_is_named_without_reading_the_layout(
+    tmp_path, kirikiri_game, tjs2_script
+):
+    # One scenario in two archives of unknown order refuses the layout, not this name.
+    startup = {"system/Initialize.tjs": tjs2_script(["addAutoPath", "patch.xp3"])}
+    extra = {"alpha.xp3": {"x.ks": b"\xff\xfeA"}, "beta.xp3": {"x.ks": b"\xff\xfeB"}}
+    game = kirikiri_game(tmp_path / "g", {}, files=startup, extra=extra)
+    assert KiriKiriAdapter.packed_archive(game) == game / "data.xp3"
 
 
 def test_a_picture_with_the_wrong_magic_is_category_3(tmp_path, kirikiri_game):

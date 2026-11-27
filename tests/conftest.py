@@ -1,5 +1,6 @@
 """Suite-wide fixtures."""
 
+import errno
 import os
 import struct
 import sys
@@ -440,6 +441,75 @@ def xp3_bytes():
     return build
 
 
+def _psb_keys(value) -> set[str]:
+    if isinstance(value, dict):
+        return set(value).union(*map(_psb_keys, value.values()))
+    if isinstance(value, list):
+        return set().union(*map(_psb_keys, value))
+    return set()
+
+
+def _psb_names_section(names) -> bytes:
+    """A test-only writer of the PSB names trie: three packed arrays (charset, tree, tails).
+
+    A node at position ``p`` gets a fresh block of 256 positions the first time it needs a
+    child; the child for byte ``b`` sits at ``charset[p] + b`` and points back with
+    ``tree[child] = p``. A name ends in a terminator at ``charset[last] + 0``.
+    """
+    from bokucho.engines import psb
+
+    charset, tree, tails = [0], [0], []
+
+    def child(p: int, byte: int) -> int:
+        if not charset[p]:
+            charset[p] = len(charset)
+            charset.extend([0] * 256)
+            tree.extend([0] * 256)
+        at = charset[p] + byte
+        tree[at] = p
+        return at
+
+    for name in names:
+        p = 0
+        for byte in name.encode("utf-8"):
+            p = child(p, byte)
+        tails.append(child(p, 0))
+    return psb.pack_ints(charset) + psb.pack_ints(tree) + psb.pack_ints(tails)
+
+
+@pytest.fixture
+def psb_file():
+    """Encode an invented PSB v3 file holding ``root``; ``names`` defaults to its sorted keys."""
+    from bokucho.engines import psb
+
+    def build(root, names=None) -> bytes:
+        names = sorted(_psb_keys(root)) if names is None else list(names)
+        return psb.encode(psb.Psb(3, tuple(names), _psb_names_section(names), root))
+
+    return build
+
+
+@pytest.fixture
+def scn_tree():
+    """An invented ``.scn`` root with one scene; each line is ``(key, (text0, text1, text2))``."""
+
+    def build(*lines, label="*s", title=None, selects=()):
+        scene = {"label": label}
+        if title is not None:
+            scene["title"] = title
+        if lines:
+            scene["texts"] = [
+                [key, [[None, texts[0], len(texts[0])]]
+                 + [[key, text, len(text)] for text in texts[1:]], None, 0, {}]
+                for key, texts in lines
+            ]
+        if selects:
+            scene["selects"] = list(selects)
+        return {"hash": "0", "name": "x", "outlines": [], "scenes": [scene]}
+
+    return build
+
+
 _STARTUP = {
     "loop": (
         "// invented startup script\n"
@@ -471,6 +541,43 @@ def _kirikiri_startup(slots: str = "loop") -> bytes:
 def kirikiri_startup():
     """Build an invented ``Initialize.tjs`` for a patch form."""
     return _kirikiri_startup
+
+
+def _tjs2(constants):
+    """An invented compiled TJS2 script whose DATA chunk holds only ``constants``."""
+    pool = struct.pack("<6I", 0, 0, 0, 0, 0, len(constants))
+    for text in constants:
+        raw = text.encode("utf-16-le")
+        # The length counts UTF-16 units: a character past U+FFFF takes two.
+        pool += struct.pack("<I", len(raw) // 2) + raw + b"\0" * (-len(raw) % 4)
+    data = b"DATA" + struct.pack("<I", len(pool)) + pool
+    return b"TJS2100\0" + struct.pack("<I", 12 + len(data)) + data
+
+
+@pytest.fixture
+def tjs2_script():
+    """Build an invented compiled startup script holding the string constants given."""
+    return _tjs2
+
+
+_NO_LINKS = {errno.EPERM, errno.ENOTSUP, errno.EOPNOTSUPP, errno.ENOSYS}
+
+
+@pytest.fixture
+def symlink():
+    """Make ``link`` point at ``target``, or skip where the system allows no symbolic link."""
+
+    def make(link: Path, target: Path) -> None:
+        try:
+            os.symlink(target, link, target_is_directory=target.is_dir())
+        except OSError as error:
+            # Only a system refusing links skips (1314: Windows without the privilege); a
+            # missing folder or a name already taken is the test's own mistake.
+            if getattr(error, "winerror", None) != 1314 and error.errno not in _NO_LINKS:
+                raise
+            pytest.skip("this system does not let the test make a symbolic link")
+
+    return make
 
 
 @pytest.fixture

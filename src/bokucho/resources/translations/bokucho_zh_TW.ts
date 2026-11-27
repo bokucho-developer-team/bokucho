@@ -281,6 +281,10 @@
         <translation>值字串</translation>
     </message>
     <message>
+        <source>Names</source>
+        <translation>人名</translation>
+    </message>
+    <message>
         <source>Pictures</source>
         <translation>圖片</translation>
     </message>
@@ -782,6 +786,7 @@
     <message><source>Repacking</source><translation>正在重新封裝</translation></message>
     <message><source>Unpacking</source><translation>正在解包</translation></message>
     <message><source>Skipped, cannot be unpacked</source><translation>已略過，無法解包</translation></message>
+    <message><source>Skipped scrambled scripts; a later version will read them</source><translation>已略過打亂的劇本，之後的版本才會讀取</translation></message>
     <message><source>Another operation is already running: {name}</source><translation>已有另一項作業在執行：{name}</translation></message>
     <message><source>Cancelling...</source><translation>正在取消...</translation></message>
     <message><source>Progress</source><translation>進度</translation></message>

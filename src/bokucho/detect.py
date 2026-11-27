@@ -68,7 +68,7 @@ SIGNATURES: tuple[Signature, ...] = (
         label="KiriKiri / KAG",
         supported=True,
         hint=(
-            "Supported for plain .xp3 archives with .ks scenarios — set [engine] type = "
+            "Supported for plain .xp3 archives with .ks or .scn scenarios — set [engine] type = "
             '"kirikiri". In project.toml, kag_skip_branches and kag_skip_labels (for example '
             '"*_chh") skip other languages\' text, and kag_name_attributes (for example '
             '"name.fn") reads speaker names. kag_image_folders (default "image", "system", '

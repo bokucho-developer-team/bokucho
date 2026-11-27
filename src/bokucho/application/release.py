@@ -211,7 +211,7 @@ def _rehearse(patch: Patch, folder: Path, work: Path, token: CancellationToken) 
         _log.info("Rehearsing the player's patcher: %s", message)
 
     try:
-        compile_recipe(folder, patch, rehearsal, report)
+        compile_recipe(folder, patch, rehearsal, report, token)
     except JobCancelled:
         raise
     except Exception as exc:  # noqa: BLE001 - whatever stops it stops every player
@@ -307,7 +307,7 @@ def _refuse_a_patched_folder(
     }
     candidates = sorted({*touched, *names})
     patched = [name for name in candidates if backup_path(layout.root / name).is_file()]
-    if (layout.root / RECORD).is_file():
+    if os.path.lexists(layout.root / RECORD):  # a link pointing nowhere too
         patched.append(RECORD)
     if patched:
         raise ReleaseBlocked(
@@ -444,11 +444,11 @@ def _rgss_scripts(layout, name: str) -> tuple[str, bytes | None]:
 
 def _kirikiri_patch(project: Project, work: Path, token: CancellationToken) -> Patch:
     """A recipe the player's patcher compiles into a new patch archive beside the game's."""
-    from bokucho.engines.kirikiri import game_folder, game_layout, scripts
+    from bokucho.engines.kirikiri import game_folder, game_layout, scenario_archives
     from bokucho.images import IMAGES_STRINGS_FILE
 
     folder = game_folder(resolve_game_path(project))
-    if (folder / RECORD).is_file():
+    if os.path.lexists(folder / RECORD):  # a link pointing nowhere too
         raise ReleaseBlocked(
             f"The game folder holds a patch already ({RECORD}). "
             "Restore the original with the patch first: a release is made against "
@@ -459,13 +459,13 @@ def _kirikiri_patch(project: Project, work: Path, token: CancellationToken) -> P
         raise ReleaseBlocked(
             "This game does not load patch archives (patch.xp3), so it is not supported yet."
         )
-    #: Every archive holding a script, in load order, overridden copies included: the
-    #: translation was made against all of them.
-    names = [name for name in layout.archives if scripts(folder, [name])]
-    files = tuple(
-        _unchanged(name, (folder / name).stat().st_size, sha256_of(folder / name))
-        for name in names
-    )
+    #: Every archive holding a copy of a scenario the adapter reads, in load order,
+    #: overridden copies included: the translation was made against all of them.
+    names = scenario_archives(folder, layout.archives, token)
+    files = []
+    for name in names:
+        token.raise_if_cancelled()
+        files.append(_unchanged(name, (folder / name).stat().st_size, sha256_of(folder / name)))
     engine = project.config.engine
     metadata = {
         "engine": "kirikiri",
@@ -498,7 +498,7 @@ def _kirikiri_patch(project: Project, work: Path, token: CancellationToken) -> P
                 archive.write(path, f"strings/{path.name}")
         for relative in pictures:
             archive.write(overlay / relative, f"out/{relative}")
-    patch = Patch(_title(project), files, recipe=stream.getvalue())
+    patch = Patch(_title(project), tuple(files), recipe=stream.getvalue())
     _rehearse(patch, folder, work, token)
     token.raise_if_cancelled()
     return patch

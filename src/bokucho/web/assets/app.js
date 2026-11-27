@@ -517,6 +517,9 @@ function translateJobMessage(message, job) {
   if (message === "engine.unpack.entry.skipped") {
     return t("JobBar", "Skipped, cannot be unpacked");
   }
+  if (message === "engine.extract.scrambled.skipped") {
+    return t("JobBar", "Skipped scrambled scripts; a later version will read them");
+  }
   if (message === "Downloading CUDA OCR runtime") {
     return t("JobBar", "Downloading CUDA OCR runtime");
   }

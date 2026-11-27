@@ -18,7 +18,7 @@ _BOM_UTF8 = b"\xef\xbb\xbf"
 # KiriKiri's own text scrambling starts a file with FE FE and a mode byte.
 _SCRAMBLED = b"\xfe\xfe"
 _CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
-_LINE_BREAK = re.compile(r"\r\n|[\n\r\v\f\x1c-\x1e\x85  ]")
+LINE_BREAK = re.compile(r"\r\n|[\n\r\v\f\x1c-\x1e\x85  ]")
 # What a KAG line means when it starts (after spaces) with one of these.
 _LINE_START = {";": "comment", "*": "label", "@": "command"}
 
@@ -305,15 +305,26 @@ def _dialogue(piece: Piece, target: str, body: str) -> str:
             f"{piece.id}: the translation starts the line with {first!r}, which the game "
             f"reads as a {_LINE_START[first]}."
         )
-    return _LINE_BREAK.sub("[r]", target)
+    return LINE_BREAK.sub("[r]", target)
 
 
 def _name(piece: Piece, target: str) -> str:
-    if '"' in target or _LINE_BREAK.search(target):
+    if '"' in target or LINE_BREAK.search(target):
         raise UnsafeTarget(
             f"{piece.id}: a speaker name can hold neither a double quote nor a line break."
         )
     return f'"{target}"'
+
+
+def check_writable(piece_id: str, target: str) -> None:
+    """Refuse a lone surrogate: no encoding writes half a character, so the save would fail."""
+    try:
+        target.encode("utf-8")
+    except UnicodeEncodeError as error:
+        raise UnsafeTarget(
+            f"{piece_id}: the translation holds U+{ord(target[error.start]):04X}, half of a "
+            "character, which cannot be written."
+        ) from None
 
 
 def rewrite(text: str, file: str, rules: KagRules, targets: Mapping[str, str]) -> str:
@@ -324,6 +335,7 @@ def rewrite(text: str, file: str, rules: KagRules, targets: Mapping[str, str]) -
         target = targets.get(piece.id)
         if target is None or not target.strip() or target == piece.source:
             continue
+        check_writable(piece.id, target)
         body = lines[piece.line][0]
         new = _name(piece, target) if piece.kind == "name" else _dialogue(piece, target, body)
         edits.setdefault(piece.line, []).append((piece.start, piece.end, new))

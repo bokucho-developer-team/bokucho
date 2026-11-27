@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from pathlib import Path
@@ -16,7 +15,7 @@ from bokucho.application.contracts import (
 )
 from bokucho.application.errors import InvalidProject
 from bokucho.model import TextUnit
-from bokucho.patcher.core import RECORD, backup_path
+from bokucho.patcher.core import RECORD, backup_path, read_record
 
 _NULL_PROGRESS = NullProgressSink()
 _NEVER_CANCELLED = NeverCancelled()
@@ -42,11 +41,22 @@ def unpacked_from(cache: Path, digest: str) -> bool:
 def _compiled(archive: Path) -> str | None:
     """The digest the patcher recorded for the ``archive`` it compiled, if it recorded one."""
     try:
-        record = json.loads((archive.parent / RECORD).read_text(encoding="utf-8"))
-        compiled = record.get("compiled", {}).get(archive.name)
-    except (OSError, ValueError, AttributeError):
+        record = read_record(archive.parent)
+    except FileNotFoundError:
         return None
-    return compiled if isinstance(compiled, str) else None
+    except (OSError, ValueError):
+        record = None
+    compiled = record.get("compiled", {}) if isinstance(record, dict) else None
+    if isinstance(compiled, dict):
+        digest = compiled.get(archive.name)
+        if archive.name not in compiled or isinstance(digest, str):
+            return digest
+    # A link there is not read. It, or a record not as the patcher writes it, is not taken
+    # for none: the archive may carry a patch, and must not be unpacked as the game's own.
+    raise InvalidProject(
+        f"{RECORD} beside {archive.name} cannot be read. Restore the original game with "
+        "its patch first, or move the file away."
+    )
 
 
 def holds_original(cache: Path, archive: Path, digest: str) -> bool:
