@@ -1927,15 +1927,20 @@ def test_a_record_damaged_after_the_checks_stops_the_install_unwritten(
     assert (game / "Game.exe").read_bytes() == ORIGINAL
 
 
+@pytest.mark.parametrize(
+    ("first", "second", "own"),
+    [(None, {"added": [_FONT]}, False), ({"added": [_FONT]}, None, True)],
+    ids=["damaged-then-own", "own-then-damaged"],
+)
 def test_a_record_replaced_between_reads_is_judged_by_the_first(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch, first: dict | None, second: dict | None, own: bool
 ) -> None:
     game = tmp_path / "game"
     game.mkdir()
-    reads = iter([None, {"added": []}])
+    reads = iter([first, second])
     monkeypatch.setattr(core, "read_record", lambda folder: next(reads))
 
-    assert core._own_record(game, _font_patch()) is False
+    assert core._own_record(game, _font_patch()) is own
 
 
 def test_a_record_field_utf8_cannot_hold_stops_no_restore(tmp_path: Path) -> None:
