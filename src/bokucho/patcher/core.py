@@ -1157,8 +1157,13 @@ def _restore(folder: Path, patch: Patch, log: Log | None) -> list[str]:
         raise PatchError(_OTHER_RECORD)
     left = []
     held: PermissionError | None = None
-    # The game's own files and their backups stay, whatever a record lists.
-    kept = {name.casefold() for item in patch.files for name in (item.name, f"{item.name}.bak")}
+    # The game's own files and their backups stay, whatever a record lists: this patch's,
+    # and those an earlier restore put back.
+    kept = {
+        name.casefold()
+        for original in [*(item.name for item in patch.files), *others]
+        for name in (original, f"{original}.bak")
+    }
     for entry in listed:
         path = folder / entry["name"]
         if entry["name"].casefold() in kept:

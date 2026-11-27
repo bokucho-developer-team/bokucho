@@ -1721,6 +1721,27 @@ def test_a_restore_putting_another_original_where_one_is_still_to_go_back_is_ref
     assert {path.name: path.read_bytes() for path in game.iterdir()} == before
 
 
+def test_an_original_an_earlier_restore_put_back_stays_though_the_record_lists_it_as_added(
+    tmp_path: Path,
+) -> None:
+    game = tmp_path / "game"
+    game.mkdir()
+    for name in ("Game.exe", "Data.bin"):
+        (game / name).write_bytes(FILES[name])
+    apply(game, _patch())
+    digest = hashlib.sha256(FILES["Data.bin"]).hexdigest()
+    document = {
+        "added": [{"name": "Data.bin", "sha256": digest}],
+        "restoring": {"Data.bin": digest},
+    }
+    (game / RECORD).write_text(json.dumps(document), encoding="utf-8")
+
+    assert restore(game, _patch()) == []
+    assert sorted(path.name for path in game.iterdir()) == ["Data.bin", "Game.exe"]
+    assert (game / "Data.bin").read_bytes() == FILES["Data.bin"]
+    assert (game / "Game.exe").read_bytes() == ORIGINAL
+
+
 def test_a_mark_naming_a_file_outside_the_game_folder_is_not_taken_as_put_back(
     tmp_path: Path,
 ) -> None:
