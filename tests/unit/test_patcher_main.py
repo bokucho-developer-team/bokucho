@@ -810,6 +810,32 @@ def test_a_staged_file_swapped_for_a_link_does_not_go_in_place_of_the_game_file(
     assert sorted(path.name for path in game.iterdir()) == ["Game.exe", staged.name]
 
 
+def test_a_link_put_at_an_added_files_name_since_the_checks_is_refused_unread(
+    tmp_path: Path, symlink, monkeypatch
+) -> None:
+    # Read through, a file outside the game folder by the same content would pass as one
+    # there before the patch, and stay unrecorded.
+    game = tmp_path / "game"
+    game.mkdir()
+    (game / "Game.exe").write_bytes(ORIGINAL)
+    outside = tmp_path / "outside.ttf"
+    outside.write_bytes(b"font")
+    commit = core._commit_install
+
+    def linked_first(folder: Path, patch: Patch, staged: list) -> None:
+        symlink(folder / "font.ttf", outside)
+        commit(folder, patch, staged)
+
+    monkeypatch.setattr(core, "_commit_install", linked_first)
+    with pytest.raises(PatchError, match="連結"):
+        apply(game, _font_patch())
+    monkeypatch.undo()
+
+    assert (game / "Game.exe").read_bytes() == ORIGINAL
+    assert outside.read_bytes() == b"font"
+    assert sorted(path.name for path in game.iterdir()) == ["Game.exe", "font.ttf"]
+
+
 def test_a_file_this_patcher_could_not_take_away_is_left_listed_for_the_next(
     tmp_path: Path, monkeypatch
 ) -> None:

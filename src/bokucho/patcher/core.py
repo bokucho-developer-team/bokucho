@@ -1025,12 +1025,15 @@ def _commit_install(
         raise PatchError(_DAMAGED_RECORD_FOUND) from None
     # Only a file not there yet is this patch's to add, and to take away again: one there
     # already by the same content was there before the patch, and stays. One put there
-    # since the checks, while the game files were staged, is looked at again.
+    # since the checks, while the game files were staged, is looked at again; a link put
+    # there is refused, not read through.
     fresh = []
     for item in patch.added:
-        if not os.path.lexists(folder / item.name):
+        path = folder / item.name
+        _refuse_link(folder, path)
+        if not os.path.lexists(path):
             fresh.append(item)
-        elif sha256_of(folder / item.name) != _digest(item.data):
+        elif sha256_of(path) != _digest(item.data):
             raise PatchError(_OTHER_FILE.format(name=item.name))
     wrote: list[tuple[Path, os.stat_result, str]] = []
     moved: list[Path] = []
