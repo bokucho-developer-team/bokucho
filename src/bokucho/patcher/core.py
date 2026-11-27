@@ -49,9 +49,9 @@ _DAMAGED_RECORD = (
     f"還原紀錄「{RECORD}」已損壞，無法確定補丁加入了哪些檔案，所以沒有還原。遊戲檔案沒有被改動。"
     "請重新安裝遊戲，或把遊戲資料夾換回套用補丁前的備份。"
 )
-_DAMAGED_RECORD_RESTORED = (
-    f"還原紀錄「{RECORD}」已損壞，無法確定補丁加入了哪些檔案。原版遊戲檔案已經還原，"
-    "但補丁加入的檔案（例如字型）可能還留在遊戲資料夾裡。"
+_DAMAGED_RECORD_RESTORING = (
+    f"還原紀錄「{RECORD}」已損壞，無法確定補丁加入了哪些檔案。原版遊戲檔案會照常還原，"
+    "但補丁加入的檔案（例如字型）可能會留在遊戲資料夾裡。"
 )
 _DAMAGED_RECORD_FOUND = (
     f"還原紀錄「{RECORD}」已損壞，無法確定補丁加入了哪些檔案，所以不能套用或還原。"
@@ -1136,6 +1136,10 @@ def _restore(folder: Path, patch: Patch, log: Log | None) -> list[str]:
     for item in patch.files:
         if (folder / item.name).exists():
             _require_not_in_use(folder / item.name)
+    # Marked, the record reads as whole: a restore stopped after the mark is the last to
+    # find it damaged, so the warning is given before anything changes.
+    if damaged:
+        _report(log, _DAMAGED_RECORD_RESTORING)
     try:
         listed, others = _mark_as_a_restores(folder, patch)
         _restore_title(folder)
@@ -1147,8 +1151,6 @@ def _restore(folder: Path, patch: Patch, log: Log | None) -> list[str]:
         raise _refusal(error, folder) from error
     except FileExistsError as error:
         raise PatchError(_IN_THE_WAY.format(name=Path(error.filename).name)) from error
-    if damaged:
-        _report(log, _DAMAGED_RECORD_RESTORED)
     # An original another restore is still to put back stays its to put back: the record,
     # and what it lists, stay too, or its translation would be read as the game's own.
     if not all(_holds(folder, name, digest) for name, digest in others.items()):

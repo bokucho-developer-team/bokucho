@@ -1520,7 +1520,7 @@ def test_a_damaged_record_a_held_restore_leaves_is_said_at_once_and_finished_nex
         restore(game, _two_added(), said.append)
     monkeypatch.undo()
 
-    assert core._DAMAGED_RECORD_RESTORED in said
+    assert core._DAMAGED_RECORD_RESTORING in said
     assert (game / "Game.exe").read_bytes() == ORIGINAL
     # Its list no longer damaged, it still names this patch: marked, it is the restore's to
     # finish, not an apply's to take up.
@@ -1753,10 +1753,41 @@ def test_a_damaged_record_a_restore_could_not_take_away_is_taken_away_by_the_nex
         restore(game, _font_patch(), said.append)
     monkeypatch.undo()
 
-    assert core._DAMAGED_RECORD_RESTORED in said
+    assert core._DAMAGED_RECORD_RESTORING in said
     assert (game / "Game.exe").read_bytes() == ORIGINAL
     assert core.inspect(game, _font_patch()) == core.FolderState(core.State.FOREIGN, True)
     assert restore(game, _font_patch()) == []
+    assert sorted(path.name for path in game.iterdir()) == ["Game.exe", "font.ttf"]
+
+
+def test_a_damaged_record_is_said_by_a_restore_whose_original_will_not_go_back(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # Marked, the record reads as whole: the restore that finishes it finds nothing damaged.
+    game = tmp_path / "game"
+    game.mkdir()
+    (game / "Game.exe").write_bytes(ORIGINAL)
+    apply(game, _font_patch())
+    (game / RECORD).write_text('{"added": [', encoding="utf-8")
+    said: list[str] = []
+    move = os.replace
+
+    def held(source, target, *args, **kwargs) -> None:
+        if Path(source).name == "Game.exe.bak":
+            error = PermissionError(errno.EACCES, "in use", str(source))
+            error.winerror = core.ERROR_SHARING_VIOLATION
+            raise error
+        move(source, target, *args, **kwargs)
+
+    monkeypatch.setattr(core.os, "replace", held)
+    with pytest.raises(PatchError, match=re.escape(core._IN_USE)):
+        restore(game, _font_patch(), said.append)
+    monkeypatch.undo()
+
+    assert core._DAMAGED_RECORD_RESTORING in said
+    assert (game / "Game.exe").read_bytes() == TRANSLATED
+    assert restore(game, _font_patch()) == []
+    assert (game / "Game.exe").read_bytes() == ORIGINAL
     assert sorted(path.name for path in game.iterdir()) == ["Game.exe", "font.ttf"]
 
 
