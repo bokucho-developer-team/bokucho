@@ -1838,6 +1838,24 @@ def test_a_damaged_record_is_said_by_a_restore_whose_original_will_not_go_back(
     assert sorted(path.name for path in game.iterdir()) == ["Game.exe", "font.ttf"]
 
 
+def test_a_damaged_record_is_not_said_by_a_restore_its_mark_refuses(tmp_path: Path) -> None:
+    # Refused before anything changes, the record stays damaged for the next restore to say.
+    game = tmp_path / "game"
+    game.mkdir()
+    (game / "Game.exe").write_bytes(ORIGINAL)
+    apply(game, _font_patch())
+    document = {"added": None, "restoring": {"Game.exe": "0" * 64}}
+    (game / RECORD).write_text(json.dumps(document), encoding="utf-8")
+    said: list[str] = []
+
+    with pytest.raises(PatchError, match=re.escape(core._OTHER_RECORD)):
+        restore(game, _font_patch(), said.append)
+
+    assert core._DAMAGED_RECORD_RESTORING not in said
+    assert json.loads((game / RECORD).read_text(encoding="utf-8")) == document
+    assert (game / "Game.exe").read_bytes() == TRANSLATED
+
+
 def test_what_another_versions_record_lists_is_taken_from_one_read(
     tmp_path: Path, monkeypatch
 ) -> None:
